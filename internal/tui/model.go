@@ -48,11 +48,13 @@ func DefaultUIConfig() UIConfig {
 }
 
 type Model struct {
-	keys          KeyMap
-	help          help.Model
-	viewport      viewport.Model
-	textinput     textinput.Model
-	textarea      textarea.Model
+	keys        KeyMap
+	help        help.Model
+	viewport    viewport.Model
+	textinput   textinput.Model
+	textarea    textarea.Model
+	placeholder string
+
 	multiline     bool
 	mode          UIMode
 	width         int
@@ -126,7 +128,10 @@ func NewModel(cfg UIConfig) Model {
 	return m
 }
 
-func (m Model) Init() tea.Cmd { return nil }
+func (m Model) Init() tea.Cmd {
+	m.checkTTY()
+	return nil
+}
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -203,6 +208,9 @@ func (m Model) viewFull() string {
 }
 
 func (m Model) inputView() string {
+	if m.placeholder != "" {
+		return m.placeholder
+	}
 	if m.multiline {
 		return m.textarea.View()
 	}

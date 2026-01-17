@@ -1,13 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
-	"os"
 
 	"opencode-tty/internal/config"
 	"opencode-tty/internal/proxy"
+	"opencode-tty/internal/tui"
 )
 
 func main() {
@@ -26,6 +27,8 @@ func main() {
 		return
 	}
 
-	fmt.Println("TUI mode not implemented yet")
-	os.Exit(1)
+	ctx := context.Background()
+	if err := tui.Run(ctx, cfg); err != nil {
+		log.Fatalf("tui: %v", err)
+	}
 }
