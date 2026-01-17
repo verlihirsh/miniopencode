@@ -1,0 +1,220 @@
+package client
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+// Config holds client configuration.
+type Config struct {
+	Host    string
+	Port    int
+	BaseURL string
+	Timeout time.Duration
+}
+
+// ModelRef selects provider/model.
+type ModelRef struct {
+	ProviderID string `json:"providerID"`
+	ModelID    string `json:"modelID"`
+}
+
+// InputPart represents a prompt input part.
+type InputPart struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+	MIME string `json:"mime,omitempty"`
+	URL  string `json:"url,omitempty"`
+}
+
+// PromptInput mirrors API body for /prompt_async.
+type PromptInput struct {
+	Parts   []InputPart `json:"parts"`
+	Model   *ModelRef   `json:"model,omitempty"`
+	Agent   string      `json:"agent,omitempty"`
+	System  string      `json:"system,omitempty"`
+	NoReply bool        `json:"noReply,omitempty"`
+	Variant string      `json:"variant,omitempty"`
+}
+
+// Session represents minimal session info.
+type Session struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+// SSEEvent is a parsed SSE event with optional event name and combined data.
+type SSEEvent struct {
+	Event string
+	Data  []byte
+}
+
+// Client is a minimal HTTP client for opencode server.
+type Client struct {
+	baseURL string
+	http    *http.Client
+}
+
+// New builds a client from config, defaulting host/port when BaseURL is empty.
+func New(cfg Config) *Client {
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		host := cfg.Host
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		port := cfg.Port
+		if port == 0 {
+			port = 4096
+		}
+		baseURL = fmt.Sprintf("http://%s:%d", host, port)
+	}
+
+	timeout := cfg.Timeout
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+
+	return &Client{
+		baseURL: baseURL,
+		http:    &http.Client{Timeout: timeout},
+	}
+}
+
+// ListSessions fetches sessions.
+func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/session", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list sessions failed: %s", string(body))
+	}
+	var sessions []Session
+	if err := json.NewDecoder(resp.Body).Decode(&sessions); err != nil {
+		return nil, err
+	}
+	return sessions, nil
+}
+
+// CreateSession creates a session with given title.
+func (c *Client) CreateSession(ctx context.Context, title string) (string, error) {
+	body := map[string]string{"title": title}
+	b, _ := json.Marshal(body)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/session", bytes.NewReader(b))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("create session failed: %s", string(body))
+	}
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if id, ok := result["id"].(string); ok {
+		return id, nil
+	}
+	return "", fmt.Errorf("no session id in response")
+}
+
+// SendPromptAsync posts to /session/{id}/prompt_async.
+func (c *Client) SendPromptAsync(ctx context.Context, sessionID string, input PromptInput) error {
+	b, _ := json.Marshal(input)
+	url := fmt.Sprintf("%s/session/%s/prompt_async", c.baseURL, sessionID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("prompt failed: %s", string(body))
+	}
+	return nil
+}
+
+// ConsumeSSE connects to /event and streams events into provided channels.
+func (c *Client) ConsumeSSE(ctx context.Context, out chan<- SSEEvent, errs chan<- error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/event", nil)
+	if err != nil {
+		errs <- err
+		return
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Cache-Control", "no-cache")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		errs <- err
+		return
+	}
+
+	go func() {
+		defer resp.Body.Close()
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+		var currentEvent string
+		var dataBuf []string
+
+		flush := func() {
+			if len(dataBuf) == 0 {
+				return
+			}
+			combined := strings.Join(dataBuf, "\n")
+			out <- SSEEvent{Event: currentEvent, Data: []byte(combined)}
+			dataBuf = dataBuf[:0]
+			currentEvent = ""
+		}
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			switch {
+			case line == "":
+				flush()
+			case strings.HasPrefix(line, "event: "):
+				currentEvent = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: "):
+				dataBuf = append(dataBuf, strings.TrimPrefix(line, "data: "))
+			case strings.HasPrefix(line, ":"):
+				// keepalive/comment line
+			default:
+				// ignore unrecognized line
+			}
+
+		}
+		if err := scanner.Err(); err != nil && ctx.Err() == nil {
+			errs <- err
+			return
+		}
+	}()
+}
