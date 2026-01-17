@@ -130,7 +130,14 @@ func NewModel(cfg UIConfig) Model {
 
 func (m Model) Init() tea.Cmd {
 	m.checkTTY()
-	return nil
+	cmds := []tea.Cmd{m.textinput.Focus()}
+	if m.chunkCh != nil {
+		cmds = append(cmds, waitForChunk(m.chunkCh))
+	}
+	if m.errCh != nil {
+		cmds = append(cmds, waitForError(m.errCh))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -143,8 +150,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	case Chunk:
 		m = m.appendChunk(msg)
+		if m.chunkCh != nil {
+			return m, waitForChunk(m.chunkCh)
+		}
 	case error:
 		m.transcript = append(m.transcript, Chunk{Kind: ChunkRaw, Text: msg.Error()})
+		if m.errCh != nil {
+			return m, waitForError(m.errCh)
+		}
 	}
 	return m, nil
 }
@@ -240,6 +253,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.inputHeight++
 	case m.pendingResize && resizeDecrease(msg):
 		m.inputHeight--
+	default:
+		var cmd tea.Cmd
+		if m.multiline {
+			m.textarea, cmd = m.textarea.Update(msg)
+		} else {
+			m.textinput, cmd = m.textinput.Update(msg)
+		}
+		return m, cmd
 	}
 	m.applySizes()
 	m.pendingResize = false
