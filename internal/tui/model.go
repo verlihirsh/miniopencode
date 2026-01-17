@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type UIMode int
@@ -71,6 +72,9 @@ type Model struct {
 	errCh          <-chan error
 	maxOutputLines int
 	transcript     []Chunk
+
+	serverHost string
+	serverPort int
 }
 
 func (m Model) appendChunk(c Chunk) Model {
@@ -130,6 +134,7 @@ func NewModel(cfg UIConfig) Model {
 
 func (m Model) Init() tea.Cmd {
 	m.checkTTY()
+	m.viewport.SetContent(welcomeMessage())
 	cmds := []tea.Cmd{m.textinput.Focus()}
 	if m.chunkCh != nil {
 		cmds = append(cmds, waitForChunk(m.chunkCh))
@@ -138,6 +143,15 @@ func (m Model) Init() tea.Cmd {
 		cmds = append(cmds, waitForError(m.errCh))
 	}
 	return tea.Batch(cmds...)
+}
+
+func welcomeMessage() string {
+	return `Welcome to miniopencode!
+
+Type your message and press Enter to send.
+Press ? for help, q to quit.
+
+Ready to chat...`
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -206,18 +220,51 @@ func (m *Model) applySizes() {
 }
 
 func (m Model) viewInputOnly() string {
+	var content string
 	if m.multiline {
-		return m.textarea.View()
+		content = m.textarea.View()
+	} else {
+		content = m.textinput.View()
 	}
-	return m.textinput.View()
+	status := m.renderStatus()
+	return fmt.Sprintf("%s\n%s", status, renderWithBorder(content, inputBorderStyle, m.width, m.height-1))
 }
 
 func (m Model) viewOutputOnly() string {
-	return m.viewport.View()
+	status := m.renderStatus()
+	return fmt.Sprintf("%s\n%s", status, renderWithBorder(m.viewport.View(), outputBorderStyle, m.width, m.height-1))
 }
 
 func (m Model) viewFull() string {
-	return fmt.Sprintf("%s\n%s", m.viewport.View(), m.inputView())
+	status := m.renderStatus()
+	outputBox := renderWithBorder(m.viewport.View(), outputBorderStyle, m.width, m.height-m.inputHeight-2)
+	inputBox := renderWithBorder(m.inputView(), inputBorderStyle, m.width, m.inputHeight)
+	return fmt.Sprintf("%s\n%s\n%s", status, outputBox, inputBox)
+}
+
+func (m Model) renderStatus() string {
+	mode := "full"
+	switch m.mode {
+	case ModeInput:
+		mode = "input"
+	case ModeOutput:
+		mode = "output"
+	}
+	multilineIndicator := ""
+	if m.multiline {
+		multilineIndicator = " [multiline]"
+	}
+
+	left := titleStyle.Render(fmt.Sprintf("miniopencode"))
+	middle := statusStyle.Render(fmt.Sprintf("session=%s | mode=%s%s", m.sessionID, mode, multilineIndicator))
+	right := statusStyle.Render(fmt.Sprintf("%s:%d", m.serverHost, m.serverPort))
+
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(middle) - lipgloss.Width(right)
+	if gap < 0 {
+		gap = 0
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", gap/2), middle, strings.Repeat(" ", gap-gap/2), right)
 }
 
 func (m Model) inputView() string {
@@ -255,7 +302,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.inputHeight--
 	default:
 		var cmd tea.Cmd
-		if m.multiline {
+		if m.mode == ModeOutput {
+			m.viewport, cmd = m.viewport.Update(msg)
+		} else if m.multiline {
 			m.textarea, cmd = m.textarea.Update(msg)
 		} else {
 			m.textinput, cmd = m.textinput.Update(msg)

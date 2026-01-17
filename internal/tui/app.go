@@ -42,6 +42,8 @@ func Run(ctx context.Context, cfg config.Config) error {
 	m.chunkCh = streamer.Events
 	m.errCh = streamer.Errors
 	m.maxOutputLines = cfg.UI.MaxOutputLines
+	m.serverHost = cfg.Server.Host
+	m.serverPort = cfg.Server.Port
 
 	p := newProgram(m)
 	_, err = p.Run()
