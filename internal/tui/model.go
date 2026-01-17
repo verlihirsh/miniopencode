@@ -135,7 +135,17 @@ func NewModel(cfg UIConfig) Model {
 func (m Model) Init() tea.Cmd {
 	m.checkTTY()
 	m.viewport.SetContent(welcomeMessage())
-	cmds := []tea.Cmd{m.textinput.Focus()}
+
+	cmds := []tea.Cmd{}
+
+	if m.mode != ModeOutput {
+		if m.multiline {
+			cmds = append(cmds, m.textarea.Focus())
+		} else {
+			cmds = append(cmds, m.textinput.Focus())
+		}
+	}
+
 	if m.chunkCh != nil {
 		cmds = append(cmds, waitForChunk(m.chunkCh))
 	}
@@ -281,18 +291,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
-	case key.Matches(msg, m.keys.ModeInput):
-		m.mode = ModeInput
-		return m, nil
-	case key.Matches(msg, m.keys.ModeOutput):
-		m.mode = ModeOutput
-		return m, nil
-	case key.Matches(msg, m.keys.ModeFull):
-		m.mode = ModeFull
-		return m, nil
 	case msg.Type == tea.KeyCtrlM:
-		m.multiline = !m.multiline
-		return m, nil
+		if m.mode == ModeOutput {
+			return m, nil
+		}
+		if m.multiline {
+			m.textinput.SetValue(m.textarea.Value())
+			m.textarea.Blur()
+			m.multiline = false
+			return m, m.textinput.Focus()
+		} else {
+			m.textarea.SetValue(m.textinput.Value())
+			m.textinput.Blur()
+			m.multiline = true
+			return m, m.textarea.Focus()
+		}
 	case key.Matches(msg, m.keys.SendSingle) && !m.multiline:
 		return m, m.sendInput()
 	case key.Matches(msg, m.keys.SendMultiline) && m.multiline:
@@ -308,7 +321,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		if m.mode == ModeOutput {
 			m.viewport, cmd = m.viewport.Update(msg)
-		} else if m.multiline {
+			return m, cmd
+		}
+		if m.multiline {
 			m.textarea, cmd = m.textarea.Update(msg)
 		} else {
 			m.textinput, cmd = m.textinput.Update(msg)

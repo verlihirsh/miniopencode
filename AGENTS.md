@@ -65,14 +65,15 @@ Key fields:
 
 ## TUI Behavior
 - Modes: `input` (only input), `output` (only output), `full` (output+input)
+  - Mode is set at startup via config/flag, NOT switchable at runtime
+  - Can run multiple instances in different modes connected to same session
+  - Example: Terminal 1 with `--mode input`, Terminal 2 with `--mode output`
 - Multiline toggle: `Ctrl+M`. Single line: Enter sends. Multiline: Enter newline; Ctrl+Enter/Ctrl+J sends.
 - Keybindings:
   - Quit: `Ctrl+C`, Help: `?`
-  - Modes: `Alt+I` (input), `Alt+O` (output), `Alt+F` (full)
   - Multiline: `Ctrl+M`
   - Resize: `Ctrl+W` then `+`/`-`/`=` adjusts input height
   - Scroll: Arrow keys, `Ctrl+U/D` (half page), `Home/End` (top/bottom)
-  - Toggles: `Alt+T` (thinking), `Alt+L` (tools)
   - Send: `Enter` (single-line mode), `Ctrl+Enter`/`Ctrl+J` (multiline mode)
 - Output: SSE chunks categorized (heuristic) into thinking/tool/answer; rendered as markdown; truncated to max lines
 
