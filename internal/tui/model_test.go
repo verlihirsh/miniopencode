@@ -8,19 +8,23 @@ import (
 
 func TestModeSwitching(t *testing.T) {
 	m := NewModel(DefaultUIConfig())
-	mAny, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
-	m = mAny.(Model)
-	mAny, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	// Switch to output mode with alt+o
+	mAny, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}, Alt: true})
 	m = mAny.(Model)
 	if m.mode != ModeOutput {
 		t.Fatalf("expected output mode, got %v", m.mode)
 	}
-	mAny, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
-	m = mAny.(Model)
-	mAny, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	// Switch to input mode with alt+i
+	mAny, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}, Alt: true})
 	m = mAny.(Model)
 	if m.mode != ModeInput {
 		t.Fatalf("expected input mode, got %v", m.mode)
+	}
+	// Switch to full mode with alt+f
+	mAny, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}, Alt: true})
+	m = mAny.(Model)
+	if m.mode != ModeFull {
+		t.Fatalf("expected full mode, got %v", m.mode)
 	}
 }
 

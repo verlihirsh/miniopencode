@@ -283,12 +283,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.ModeInput):
 		m.mode = ModeInput
+		return m, nil
 	case key.Matches(msg, m.keys.ModeOutput):
 		m.mode = ModeOutput
+		return m, nil
 	case key.Matches(msg, m.keys.ModeFull):
 		m.mode = ModeFull
-	case msg.Type == tea.KeyCtrlM || key.Matches(msg, m.keys.ToggleMultiline):
+		return m, nil
+	case msg.Type == tea.KeyCtrlM:
 		m.multiline = !m.multiline
+		return m, nil
 	case key.Matches(msg, m.keys.SendSingle) && !m.multiline:
 		return m, m.sendInput()
 	case key.Matches(msg, m.keys.SendMultiline) && m.multiline:
