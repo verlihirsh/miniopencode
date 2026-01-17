@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -60,6 +61,35 @@ type Model struct {
 	showThinking  bool
 	showTools     bool
 	pendingResize bool
+
+	streamer       *Streamer
+	sessionID      string
+	promptCfg      PromptConfig
+	chunkCh        <-chan Chunk
+	errCh          <-chan error
+	maxOutputLines int
+	transcript     []Chunk
+}
+
+func (m Model) appendChunk(c Chunk) Model {
+	if c.Kind == ChunkThinking && !m.showThinking {
+		return m
+	}
+	if c.Kind == ChunkTool && !m.showTools {
+		return m
+	}
+	m.transcript = append(m.transcript, c)
+	if m.maxOutputLines > 0 {
+		var lines []string
+		for _, chunk := range m.transcript {
+			lines = append(lines, strings.Split(chunk.Text, "\n")...)
+		}
+		lines = truncateLines(lines, m.maxOutputLines)
+		m.transcript = []Chunk{{Kind: ChunkAnswer, Text: strings.Join(lines, "\n")}}
+
+	}
+	m.viewport.SetContent(renderTranscript(m.transcript, m.width))
+	return m
 }
 
 func NewModel(cfg UIConfig) Model {
@@ -106,6 +136,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applySizes()
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	case Chunk:
+		m = m.appendChunk(msg)
+	case error:
+		m.transcript = append(m.transcript, Chunk{Kind: ChunkRaw, Text: msg.Error()})
 	}
 	return m, nil
 }
@@ -188,7 +222,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.Type == tea.KeyCtrlM || key.Matches(msg, m.keys.ToggleMultiline):
 		m.multiline = !m.multiline
 	case key.Matches(msg, m.keys.SendSingle) && !m.multiline:
+		return m, m.sendInput()
 	case key.Matches(msg, m.keys.SendMultiline) && m.multiline:
+		return m, m.sendInput()
 	case msg.Type == tea.KeyCtrlW:
 		m.pendingResize = true
 		return m, nil
