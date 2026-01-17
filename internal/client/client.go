@@ -48,6 +48,20 @@ type PromptInput struct {
 type Session struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
+	Part  int    `json:"-"`
+}
+
+// TokenUsage captures token counts on a message.
+type TokenUsage struct {
+	Input     int `json:"input"`
+	Output    int `json:"output"`
+	Reasoning int `json:"reasoning"`
+}
+
+// Message represents a minimal session message with token metadata.
+type Message struct {
+	ID     string      `json:"id"`
+	Tokens *TokenUsage `json:"tokens,omitempty"`
 }
 
 // SSEEvent is a parsed SSE event with optional event name and combined data.
