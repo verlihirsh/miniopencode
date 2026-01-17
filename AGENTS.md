@@ -2,227 +2,119 @@
 
 ## Project Overview
 
-**opencode-tty** is a Go proxy that bridges stdin/stdout with an opencode server via HTTP and SSE.
-- Single-file Go application (`main.go`)
-- Reads JSON commands from stdin, writes JSON responses to stdout
-- Proxies to opencode server for session management and prompt handling
+**miniopencode** is a terminal opencode client with headless proxy + interactive TUI.
+- Headless: stdin JSON → stdout JSON (legacy proxy)
+- TUI: chat interface with modes (input/output/full), SSE streaming, markdown output
+- Communicates with opencode server via HTTP/SSE
 
 ---
 
-## Build, Test, and Run Commands
+## Build, Test, Run
 
 ### Build
 ```bash
-go build -o opencode-tty .
+go build -o miniopencode ./cmd/miniopencode
 ```
 
 ### Run
 ```bash
-# With defaults (127.0.0.1:4096)
-./opencode-tty
+# TUI (default)
+./miniopencode
 
-# With custom host/port
-OPENCODE_HOST=localhost OPENCODE_PORT=8080 ./opencode-tty
+# Headless legacy proxy
+./miniopencode --headless
+
+# Custom config
+./miniopencode --config ~/.config/miniopencode.yaml
 ```
 
 ### Test
 ```bash
-# Run all tests
-go test -v ./...
-
-# Run single test
-go test -v -run TestFunctionName ./...
-
-# Run tests with coverage
-go test -cover ./...
-```
-
-**Note**: No tests exist yet. When adding tests, follow Go conventions:
-- Test files: `*_test.go`
-- Test functions: `func TestXxx(t *testing.T)`
-
-### Lint and Format
-```bash
-# Format code
-go fmt ./...
-
-# Static analysis
-go vet ./...
-
-# If golangci-lint installed:
-golangci-lint run
+go test ./...
 ```
 
 ---
 
-## Code Style Guidelines
+## Config
+- Default path: `~/.config/miniopencode.yaml`
+- Example: `miniopencode.example.yaml`
+- Merge: defaults → YAML → CLI overrides
 
-### File Organization
-- Keep related types and functions together
-- Order: types → constructors → methods → helpers → main
-
-### Imports
-```go
-import (
-    // Standard library (sorted alphabetically)
-    "bufio"
-    "bytes"
-    "encoding/json"
-    "fmt"
-
-    // External packages (if any, blank line between groups)
-    // "github.com/some/package"
-
-    // Internal packages (if any)
-    // "opencode-tty/internal/..."
-)
-```
-
-### Naming Conventions
-| Element | Style | Example |
-|---------|-------|---------|
-| Packages | lowercase, single word | `main`, `proxy` |
-| Exported types/funcs | PascalCase | `Config`, `NewProxy` |
-| Unexported | camelCase | `baseURL`, `outputError` |
-| Constants | PascalCase or ALL_CAPS | `MaxBufferSize` |
-| Acronyms | Consistent case | `HTTP`, `SSE`, `ID` |
-
-### Struct Tags
-- Use `json:"fieldName"` for JSON marshaling
-- Use `json:"fieldName,omitempty"` for optional fields
-- Keep tags on same line when short
-
-```go
-type Config struct {
-    Host      string `json:"host"`
-    Port      string `json:"port"`
-    SessionID string `json:"session_id,omitempty"`
-}
-```
-
-### Error Handling
-- Always check errors immediately after function calls
-- Return errors to caller, don't swallow them
-- Use `fmt.Errorf("context: %v", err)` for wrapping
-
-```go
-// GOOD
-resp, err := http.Get(url)
-if err != nil {
-    return fmt.Errorf("failed to fetch %s: %w", url, err)
-}
-defer resp.Body.Close()
-
-// BAD - Don't ignore errors
-resp, _ := http.Get(url)
-```
-
-### Defer for Cleanup
-- Use `defer` for closing resources immediately after opening
-- Defer after nil check, not before
-
-```go
-resp, err := http.Get(url)
-if err != nil {
-    return err
-}
-defer resp.Body.Close()  // Correct placement
-```
-
-### Mutex Usage
-- Lock/unlock in same function when possible
-- Use `defer p.mu.Unlock()` for safety
-- Keep critical sections small
-
-```go
-func (p *Proxy) output(eventType string, data interface{}) {
-    p.mu.Lock()
-    defer p.mu.Unlock()
-    // ... protected operations
-}
-```
-
-### JSON Handling
-- Use `json.RawMessage` for delayed parsing
-- Use `map[string]interface{}` for dynamic JSON (sparingly)
-- Prefer typed structs when structure is known
+Key fields:
+- `server.host`, `server.port`
+- `session.default_session`: "" | session ID | `daily`
+- `session.daily_title_format`: default `2006-01-02-daily-%d`
+- `session.daily_max_tokens`, `session.daily_max_messages`
+- `defaults.agent`, `defaults.provider_id`, `defaults.model_id`
+- `ui.mode`: `input|output|full`
+- `ui.multiline`: true enables Ctrl+Enter send; Enter inserts newline
+- `ui.show_thinking`, `ui.show_tools`, `ui.wrap`, `ui.input_height`, `ui.max_output_lines`, `ui.theme`
+- `theme`: border style/colors for output/input/status/thinking/tool/answer
 
 ---
 
-## API Communication Patterns
-
-### Command Structure (stdin → proxy)
-```json
-{"type": "command.name", "payload": {...}}
-```
-
-### Response Structure (proxy → stdout)
-```json
-{"type": "event.name", "data": {...}}
-```
-
-### Supported Commands
-- `health` - Check server health
-- `session.create` - Create new session
-- `session.list` - List all sessions
-- `session.select` - Select active session
-- `prompt` - Send prompt to active session
-- `sse.start` / `sse.stop` - Control SSE stream
+## Code Structure
+- `cmd/miniopencode`: entrypoint, flags `--headless`, `--config`
+- `internal/config`: YAML/CLI loader, defaults
+- `internal/proxy`: headless stdin/stdout proxy
+- `internal/client`: HTTP + SSE client (sessions, prompt_async, SSE reader)
+- `internal/session`: daily resolver (token/message limits)
+- `internal/tui`: keymap, model, SSE chunking, markdown render, truncation
 
 ---
 
-## Testing Guidelines (When Adding Tests)
-
-### Table-Driven Tests
-```go
-func TestSomething(t *testing.T) {
-    tests := []struct {
-        name     string
-        input    string
-        expected string
-        wantErr  bool
-    }{
-        {"valid input", "foo", "bar", false},
-        {"empty input", "", "", true},
-    }
-    
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            got, err := Something(tt.input)
-            if (err != nil) != tt.wantErr {
-                t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
-            }
-            if got != tt.expected {
-                t.Errorf("got = %v, want %v", got, tt.expected)
-            }
-        })
-    }
-}
-```
+## TUI Behavior
+- Modes: `input` (only input), `output` (only output), `full` (output+input)
+- Multiline toggle: `Ctrl+M`. Single line: Enter sends. Multiline: Enter newline; Ctrl+Enter/Ctrl+J sends.
+- Keybindings (vim-like):
+  - Quit `q`/`ctrl+c`, Help `?`
+  - Modes: `g i`, `g o`, `g f`
+  - Multiline: `ctrl+m`
+  - Resize: `ctrl+w` then `+`/`-`/`=` adjusts input height
+  - Scroll: `j/k`, `u/d` half page, `f/b` page, `g/G` top/bottom
+  - Toggles: `t t` thinking, `t o` tools
+  - Send: Enter (single), Ctrl+Enter/Ctrl+J (multiline)
+- Output: SSE chunks categorized (heuristic) into thinking/tool/answer; rendered as markdown; truncated to max lines
 
 ---
 
-## Do's and Don'ts
-
-### DO
-- Run `go fmt` before committing
-- Use meaningful variable names
-- Keep functions focused and small
-- Handle all errors explicitly
-- Close resources with defer
-
-### DON'T
-- Ignore errors with `_`
-- Use global variables
-- Leave commented-out code
-- Use `panic` for recoverable errors
-- Commit without `go vet` passing
+## Session Handling
+- Default session resolution:
+  - If `default_session` is an ID: use it or create if missing
+  - If `daily`: find `YYYY-MM-DD-daily-<part>`; reuse latest if under limits; else create next part
+  - Limits default: tokens 250000, messages 4000
 
 ---
 
-## Environment Variables
+## API Notes (opencode server)
+- Health: `GET /global/health`
+- Sessions: `GET/POST /session`, `GET /session/{id}`, `GET /session/{id}/message`
+- Prompt: `POST /session/{id}/prompt_async` with `parts`, optional `model {providerID, modelID}`, `agent`, `system`, `variant`
+- SSE: `GET /event` (project) or `/global/event`; events include `message.updated`, `message.part.updated`, `session.*`
+- Messages: tokens metadata `tokens.input|output|reasoning`, `cost`, `modelID`, `providerID`, `agent`
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENCODE_HOST` | `127.0.0.1` | Server host |
-| `OPENCODE_PORT` | `4096` | Server port |
+---
+
+## Headless Commands (legacy)
+- `{"type":"health"}`
+- `{"type":"session.create","payload":{"title":"..."}}`
+- `{"type":"session.list"}`
+- `{"type":"session.select","payload":{"id":"..."}}`
+- `{"type":"prompt","payload":{"text":"...","provider_id":"...","model_id":"..."}}`
+- `{"type":"sse.start"}` / `{"type":"sse.stop"}`
+
+---
+
+## Coding Guidelines
+- go fmt, go test ./... before commit
+- Imports: stdlib → external → internal; keep clean
+- Errors: wrap with context; never ignore
+- Avoid global state; prefer explicit config/structs
+
+---
+
+## Build/Release Checklist
+- go test ./...
+- go mod tidy
+- Update `miniopencode.example.yaml` if config changes
+- Keep AGENTS.md in sync (commands, config, keybindings)

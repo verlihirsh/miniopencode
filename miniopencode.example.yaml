@@ -1,0 +1,33 @@
+server:
+  host: 127.0.0.1
+  port: 4096
+
+session:
+  default_session: daily
+  daily_title_format: "2006-01-02-daily-%d"
+  daily_max_tokens: 250000
+  daily_max_messages: 4000
+
+defaults:
+  agent: build
+  provider_id: anthropic
+  model_id: claude-3-5-sonnet
+
+ui:
+  mode: full
+  multiline: false
+  show_thinking: true
+  show_tools: true
+  wrap: true
+  input_height: 6
+  max_output_lines: 4000
+  theme: default
+
+theme:
+  border_style: rounded
+  output_border_color: "#89b4fa"
+  input_border_color: "#a6e3a1"
+  status_color: "#6c7086"
+  thinking_color: "#f9e2af"
+  tool_color: "#94e2d5"
+  answer_color: "#cdd6f4"
