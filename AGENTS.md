@@ -66,14 +66,14 @@ Key fields:
 ## TUI Behavior
 - Modes: `input` (only input), `output` (only output), `full` (output+input)
 - Multiline toggle: `Ctrl+M`. Single line: Enter sends. Multiline: Enter newline; Ctrl+Enter/Ctrl+J sends.
-- Keybindings (vim-like):
-  - Quit `q`/`ctrl+c`, Help `?`
-  - Modes: `g i`, `g o`, `g f`
-  - Multiline: `ctrl+m`
-  - Resize: `ctrl+w` then `+`/`-`/`=` adjusts input height
-  - Scroll: `j/k`, `u/d` half page, `f/b` page, `g/G` top/bottom
-  - Toggles: `t t` thinking, `t o` tools
-  - Send: Enter (single), Ctrl+Enter/Ctrl+J (multiline)
+- Keybindings:
+  - Quit: `Ctrl+C`, Help: `?`
+  - Modes: `Alt+I` (input), `Alt+O` (output), `Alt+F` (full)
+  - Multiline: `Ctrl+M`
+  - Resize: `Ctrl+W` then `+`/`-`/`=` adjusts input height
+  - Scroll: Arrow keys, `Ctrl+U/D` (half page), `Home/End` (top/bottom)
+  - Toggles: `Alt+T` (thinking), `Alt+L` (tools)
+  - Send: `Enter` (single-line mode), `Ctrl+Enter`/`Ctrl+J` (multiline mode)
 - Output: SSE chunks categorized (heuristic) into thinking/tool/answer; rendered as markdown; truncated to max lines
 
 ---
