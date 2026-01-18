@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -98,7 +99,6 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	// File logging (avoid corrupting the TUI). Enabled via --log or DEBUG=1.
 	var logFile *os.File
 	if *logPath != "" || os.Getenv("DEBUG") != "" {
 		path := *logPath
@@ -112,6 +112,8 @@ func main() {
 		logFile = f
 		defer logFile.Close()
 		log.Printf("logging enabled: %s", path)
+	} else {
+		log.SetOutput(io.Discard)
 	}
 
 	if *headless {

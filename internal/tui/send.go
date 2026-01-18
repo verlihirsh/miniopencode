@@ -45,10 +45,7 @@ func (m Model) sendInput() (Model, tea.Cmd) {
 type sendComplete struct{}
 
 func (m Model) handleSendComplete() Model {
-	m.flushTypewriterBuf()
-	m.viewport.SetContent(m.transcript.Render(m.showThinking, m.showTools, m.spinner.View(), false))
 	m = m.clearInput()
-	m.sending = false
 	return m
 }
 

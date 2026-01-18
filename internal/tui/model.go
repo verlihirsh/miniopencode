@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -48,6 +47,12 @@ func DefaultUIConfig() UIConfig {
 	}
 }
 
+type typewriter struct {
+	buf    []rune
+	partID string
+	msgID  string
+}
+
 type Model struct {
 	keys        KeyMap
 	help        help.Model
@@ -74,7 +79,7 @@ type Model struct {
 	errCh          <-chan error
 	maxOutputLines int
 
-	transcript Transcript
+	transcript *Transcript
 
 	lastPartID    string
 	lastMessageID string
@@ -82,9 +87,7 @@ type Model struct {
 	serverHost string
 	serverPort int
 
-	typewriterBuf    []rune
-	typewriterPartID string
-	typewriterMsgID  string
+	tw *typewriter
 }
 
 func (m Model) appendChunk(c Chunk) Model {
@@ -128,6 +131,8 @@ func NewModel(cfg UIConfig) Model {
 		showTools:    cfg.ShowTools,
 		inputHeight:  cfg.InputHeight,
 		followOutput: true,
+		transcript:   &Transcript{},
+		tw:           &typewriter{},
 	}
 
 	m.textinput.Focus()
@@ -176,12 +181,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.applySizes()
+		return m, nil
+	case tea.MouseMsg:
+		if m.mode != ModeInput {
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
+		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	case streamClosed:
+		m.sending = false
+		m.chunkCh = nil
+		m.errCh = nil
+		return m, nil
 	case Chunk:
+		if msg.Kind == ChunkMeta {
+			m.transcript.EnsureAssistantMessage(msg.MessageID)
+			if msg.Complete && m.sending {
+				m.flushTypewriterBuf()
+				m.sending = false
+				m.viewport.SetContent(m.transcript.Render(m.showThinking, m.showTools, m.spinner.View(), m.sending))
+			}
+			return m, waitForChunk(m.chunkCh)
+		}
 		m = m.bufferChunk(msg)
 		cmds := []tea.Cmd{waitForChunk(m.chunkCh)}
-		if len(m.typewriterBuf) > 0 {
+		if len(m.tw.buf) > 0 {
 			cmds = append(cmds, m.typewriterTick())
 		}
 		return m, tea.Batch(cmds...)
@@ -193,7 +219,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m = m.clearInput()
 		m.sending = false
 		if msg != nil {
-			log.Printf("tui: error displayed: %v", msg)
 			m.transcript.AddAssistantSystemLine("[Error] " + msg.Error())
 			m.viewport.SetContent(m.transcript.Render(m.showThinking, m.showTools, m.spinner.View(), m.sending))
 
@@ -253,14 +278,16 @@ func (m *Model) applySizes() {
 
 	switch m.mode {
 	case ModeOutput:
+		outputBoxHeight := m.height - headerHeight - footerHeight
 		m.viewport.Width = contentWidth
-		m.viewport.Height = m.height - headerHeight - footerHeight - borderOverhead
+		m.viewport.Height = outputBoxHeight - borderOverhead
 	case ModeInput:
 		m.textinput.Width = contentWidth
 	default:
 		inputBoxHeight := m.inputHeight + borderOverhead
+		outputBoxHeight := m.height - headerHeight - footerHeight - inputBoxHeight
 		m.viewport.Width = contentWidth
-		m.viewport.Height = m.height - headerHeight - footerHeight - inputBoxHeight - borderOverhead
+		m.viewport.Height = outputBoxHeight - borderOverhead
 		m.textinput.Width = contentWidth
 	}
 
@@ -376,7 +403,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func isScrollKey(msg tea.KeyMsg) bool {
 	switch msg.Type {
-	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown, tea.KeyHome, tea.KeyEnd:
+	case tea.KeyPgUp, tea.KeyPgDown, tea.KeyHome, tea.KeyEnd:
 		return true
 	case tea.KeyCtrlU, tea.KeyCtrlD:
 		return true
@@ -432,45 +459,45 @@ func (m Model) bufferChunk(c Chunk) Model {
 		return m
 	}
 
-	if c.PartID != m.typewriterPartID || c.MessageID != m.typewriterMsgID {
+	if c.PartID != m.tw.partID || c.MessageID != m.tw.msgID {
 		m.flushTypewriterBuf()
-		m.typewriterPartID = c.PartID
-		m.typewriterMsgID = c.MessageID
+		m.tw.partID = c.PartID
+		m.tw.msgID = c.MessageID
 	}
 
-	m.typewriterBuf = append(m.typewriterBuf, []rune(c.Text)...)
+	m.tw.buf = append(m.tw.buf, []rune(c.Text)...)
 	return m
 }
 
 func (m *Model) flushTypewriterBuf() {
-	if len(m.typewriterBuf) == 0 {
+	if len(m.tw.buf) == 0 {
 		return
 	}
-	text := string(m.typewriterBuf)
-	m.transcript.AppendAssistantChunk(m.typewriterMsgID, m.typewriterPartID, ChunkAnswer, text)
-	m.typewriterBuf = nil
+	text := string(m.tw.buf)
+	m.transcript.AppendAssistantChunk(m.tw.msgID, m.tw.partID, ChunkAnswer, text)
+	m.tw.buf = nil
 }
 
 func (m Model) handleTypewriterTick() (tea.Model, tea.Cmd) {
-	if len(m.typewriterBuf) == 0 {
+	if len(m.tw.buf) == 0 {
 		return m, nil
 	}
 
 	chunkSize := 3
-	if len(m.typewriterBuf) < chunkSize {
-		chunkSize = len(m.typewriterBuf)
+	if len(m.tw.buf) < chunkSize {
+		chunkSize = len(m.tw.buf)
 	}
 
-	chunk := string(m.typewriterBuf[:chunkSize])
-	m.typewriterBuf = m.typewriterBuf[chunkSize:]
+	chunk := string(m.tw.buf[:chunkSize])
+	m.tw.buf = m.tw.buf[chunkSize:]
 
-	m.transcript.AppendAssistantChunk(m.typewriterMsgID, m.typewriterPartID, ChunkAnswer, chunk)
+	m.transcript.AppendAssistantChunk(m.tw.msgID, m.tw.partID, ChunkAnswer, chunk)
 	m.viewport.SetContent(m.transcript.Render(m.showThinking, m.showTools, m.spinner.View(), m.sending))
 	if m.followOutput {
 		m.viewport.GotoBottom()
 	}
 
-	if len(m.typewriterBuf) > 0 {
+	if len(m.tw.buf) > 0 {
 		return m, m.typewriterTick()
 	}
 	return m, nil

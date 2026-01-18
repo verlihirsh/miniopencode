@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
+	"sync"
 
 	"opencode-tty/internal/client"
 )
@@ -12,25 +14,47 @@ type Streamer struct {
 	Client *client.Client
 	Events chan Chunk
 	Errors chan error
+
+	mu           sync.RWMutex
+	messageRoles map[string]string
+	partTexts    map[string]string // tracks last known text per partID for delta computation
 }
 
 func (s *Streamer) Start(ctx context.Context) {
+	s.messageRoles = make(map[string]string)
+	s.partTexts = make(map[string]string)
 	raw := make(chan client.SSEEvent, 32)
 	errs := make(chan error, 1)
-	go s.Client.ConsumeSSE(ctx, raw, errs)
+
 	go func() {
+		s.Client.ConsumeSSE(ctx, raw, errs)
+		close(raw)
+	}()
+
+	go func() {
+		defer close(s.Events)
+		defer close(s.Errors)
 		for {
 			select {
-			case ev := <-raw:
+			case ev, ok := <-raw:
+				if !ok {
+					return
+				}
 				if len(ev.Data) == 0 {
 					continue
 				}
-				chunk := parseSSEToChunk(ev)
-				if chunk.Text == "" {
+				chunk := s.parseSSEToChunk(ev)
+				if chunk.Kind == ChunkSkip {
+					continue
+				}
+				if chunk.Text == "" && chunk.Kind != ChunkMeta {
 					continue
 				}
 				s.Events <- chunk
-			case err := <-errs:
+			case err, ok := <-errs:
+				if !ok {
+					return
+				}
 				log.Printf("tui: sse error: %v", err)
 				s.Errors <- fmt.Errorf("sse stream error: %w", err)
 				return
@@ -41,25 +65,68 @@ func (s *Streamer) Start(ctx context.Context) {
 	}()
 }
 
-func parseSSEToChunk(ev client.SSEEvent) Chunk {
+func (s *Streamer) parseSSEToChunk(ev client.SSEEvent) Chunk {
 	parsed, err := client.ParseEvent(ev)
 	if err != nil {
 		log.Printf("tui: parse event error: %v", err)
-		return Chunk{Kind: ChunkRaw, Text: ""}
+		return Chunk{Kind: ChunkSkip}
 	}
 
 	switch e := parsed.(type) {
+	case *client.MessageUpdatedEvent:
+		info := e.Properties.Info
+		s.mu.Lock()
+		s.messageRoles[info.ID] = info.Role
+		s.mu.Unlock()
+		log.Printf("tui: message.updated id=%s role=%s", info.ID, info.Role)
+		if info.Role == "assistant" {
+			return Chunk{
+				Kind:      ChunkMeta,
+				MessageID: info.ID,
+				Complete:  info.IsComplete(),
+			}
+		}
+		return Chunk{Kind: ChunkSkip}
+
 	case *client.MessagePartUpdatedEvent:
+		msgID := e.Properties.Part.MessageID
+		s.mu.RLock()
+		role := s.messageRoles[msgID]
+		s.mu.RUnlock()
+
+		if role == "user" {
+			log.Printf("tui: skipping user message part msgID=%s", msgID)
+			return Chunk{Kind: ChunkSkip}
+		}
+
 		update := e.ToStreamUpdate()
+		text := strings.Clone(update.Text)
+
+		s.mu.Lock()
+		if update.Op == client.OpSet {
+			prev := s.partTexts[update.PartID]
+			if text == prev {
+				s.mu.Unlock()
+				return Chunk{Kind: ChunkSkip}
+			}
+			if len(text) > len(prev) && text[:len(prev)] == prev {
+				text = strings.Clone(text[len(prev):])
+			}
+			s.partTexts[update.PartID] = text
+		} else {
+			s.partTexts[update.PartID] += text
+		}
+		s.mu.Unlock()
+
 		return Chunk{
 			Kind:      streamUpdateKindToChunkKind(update.Kind),
-			Text:      update.Text,
+			Text:      text,
 			PartID:    update.PartID,
 			MessageID: update.MessageID,
 			Complete:  update.Complete,
 		}
 	default:
-		return Chunk{Kind: ChunkRaw, Text: ""}
+		return Chunk{Kind: ChunkSkip}
 	}
 }
 

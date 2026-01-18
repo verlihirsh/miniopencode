@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"sync"
 	"time"
 
 	"opencode-tty/internal/client"
@@ -29,10 +30,13 @@ type TranscriptMessage struct {
 }
 
 type Transcript struct {
+	mu       sync.RWMutex
 	messages []TranscriptMessage
 }
 
 func (t *Transcript) AddUserMessage(text string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	var b strings.Builder
 	b.WriteString(text)
 	t.messages = append(t.messages, TranscriptMessage{
@@ -58,6 +62,8 @@ func (t *Transcript) EnsurePendingAssistant(messageID string) {
 }
 
 func (t *Transcript) EnsureAssistantMessage(messageID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.EnsurePendingAssistant(messageID)
 }
 
@@ -75,6 +81,8 @@ func partKindToChunkKind(pk client.PartKind) ChunkKind {
 }
 
 func (t *Transcript) ApplyUpdate(update client.StreamUpdate) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.EnsurePendingAssistant(update.MessageID)
 	msg := &t.messages[len(t.messages)-1]
 
@@ -138,13 +146,17 @@ func chunkKindToPartKind(ck ChunkKind) client.PartKind {
 }
 
 func (t *Transcript) AddAssistantSystemLine(text string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.messages = append(t.messages, TranscriptMessage{Role: RoleAssistant, Created: time.Now()})
 	msg := &t.messages[len(t.messages)-1]
 	msg.Parts = append(msg.Parts, TranscriptPart{Kind: ChunkAnswer})
 	msg.Parts[len(msg.Parts)-1].Text.WriteString(text)
 }
 
-func (t Transcript) Render(showThinking, showTools bool, spinnerFrame string, showSpinner bool) string {
+func (t *Transcript) Render(showThinking, showTools bool, spinnerFrame string, showSpinner bool) string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	var b strings.Builder
 	for i, m := range t.messages {
 		if i > 0 {

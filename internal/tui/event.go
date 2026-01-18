@@ -7,6 +7,8 @@ const (
 	ChunkTool     ChunkKind = "tool"
 	ChunkAnswer   ChunkKind = "answer"
 	ChunkRaw      ChunkKind = "raw"
+	ChunkSkip     ChunkKind = "skip"
+	ChunkMeta     ChunkKind = "meta"
 )
 
 type Chunk struct {
