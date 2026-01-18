@@ -190,6 +190,8 @@ func TestE2ESessionResolutionWithSSE(t *testing.T) {
 
 // TestE2EDailySessionRollover tests that when limits are exceeded, a new daily session part is created.
 func TestE2EDailySessionRollover(t *testing.T) {
+	const testTokenLimit = 1000 // Set low limit to trigger rollover
+	
 	var (
 		mu           sync.Mutex
 		createdParts []string
@@ -239,7 +241,7 @@ func TestE2EDailySessionRollover(t *testing.T) {
 	cfg := config.Config{
 		Session: config.SessionConfig{
 			DailyTitleFormat: "2006-01-02-daily-%d",
-			DailyMaxTokens:   1000, // Set low limit to trigger rollover
+			DailyMaxTokens:   testTokenLimit,
 			DailyMaxMessages: 4000,
 		},
 	}

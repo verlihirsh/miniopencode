@@ -136,9 +136,11 @@ func TestResolveDailyCreatesTodayWhenOnlyOldSessions(t *testing.T) {
 }
 
 func TestResolveDailyRollsOverOnMessageLimit(t *testing.T) {
+	const testMessageLimit = 2
+	
 	title := "2026-01-17-daily-10"
 	cfg := baseConfig()
-	cfg.Session.DailyMaxMessages = 2
+	cfg.Session.DailyMaxMessages = testMessageLimit
 	
 	sc := &stubClient{
 		sessions: []client.Session{{ID: "ses-10", Title: title}},
@@ -146,7 +148,7 @@ func TestResolveDailyRollsOverOnMessageLimit(t *testing.T) {
 			"ses-10": {
 				{Tokens: &client.TokenUsage{Input: 1, Output: 1}},
 				{Tokens: &client.TokenUsage{Input: 1, Output: 1}},
-				{Tokens: &client.TokenUsage{Input: 1, Output: 1}}, // 3 messages exceeds limit of 2
+				{Tokens: &client.TokenUsage{Input: 1, Output: 1}}, // 3 messages exceeds limit
 			},
 		},
 	}
