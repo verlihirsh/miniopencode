@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -64,6 +65,7 @@ type Model struct {
 	pendingResize bool
 	sending       bool
 	followOutput  bool
+	ready         bool // true after first WindowSizeMsg
 
 	streamer       *Streamer
 	sessionID      string
@@ -79,6 +81,10 @@ type Model struct {
 
 	serverHost string
 	serverPort int
+
+	typewriterBuf    []rune
+	typewriterPartID string
+	typewriterMsgID  string
 }
 
 func (m Model) appendChunk(c Chunk) Model {
@@ -173,10 +179,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	case Chunk:
-		m = m.appendChunk(msg)
-		if m.chunkCh != nil {
-			return m, waitForChunk(m.chunkCh)
+		m = m.bufferChunk(msg)
+		cmds := []tea.Cmd{waitForChunk(m.chunkCh)}
+		if len(m.typewriterBuf) > 0 {
+			cmds = append(cmds, m.typewriterTick())
 		}
+		return m, tea.Batch(cmds...)
+	case typewriterTickMsg:
+		return m.handleTypewriterTick()
 	case sendComplete:
 		m = m.handleSendComplete()
 	case error:
@@ -206,6 +216,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	if !m.ready {
+		return "\n  Initializing..."
+	}
 	switch m.mode {
 	case ModeInput:
 		return m.viewInputOnly()
@@ -221,46 +234,63 @@ func (m *Model) applySizes() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
+
+	headerHeight := lipgloss.Height(m.renderStatus())
+	footerHeight := lipgloss.Height(m.footerView())
+	borderOverhead := 2
+
 	if m.inputHeight < minInputHeight {
 		m.inputHeight = minInputHeight
 	}
-	if m.inputHeight > m.height-minOutputHeight {
-		m.inputHeight = m.height - minOutputHeight
+	if m.inputHeight > m.height-minOutputHeight-headerHeight-footerHeight {
+		m.inputHeight = m.height - minOutputHeight - headerHeight - footerHeight
 	}
 	if m.inputHeight < minInputHeight {
 		m.inputHeight = minInputHeight
 	}
-	if m.mode == ModeOutput {
-		m.viewport.Width = m.width - 4
-		m.viewport.Height = m.height - 4
-		return
+
+	contentWidth := m.width - borderOverhead - 2
+
+	switch m.mode {
+	case ModeOutput:
+		m.viewport.Width = contentWidth
+		m.viewport.Height = m.height - headerHeight - footerHeight - borderOverhead
+	case ModeInput:
+		m.textinput.Width = contentWidth
+	default:
+		inputBoxHeight := m.inputHeight + borderOverhead
+		m.viewport.Width = contentWidth
+		m.viewport.Height = m.height - headerHeight - footerHeight - inputBoxHeight - borderOverhead
+		m.textinput.Width = contentWidth
 	}
-	if m.mode == ModeInput {
-		m.textinput.Width = m.width - 2
-		return
-	}
-	m.viewport.Width = m.width - 4
-	m.viewport.Height = m.height - m.inputHeight - 4
-	m.textinput.Width = m.width - 2
+
+	m.ready = true
 }
 
 func (m Model) viewInputOnly() string {
-	content := m.textinput.View()
 	status := m.renderStatus()
-	return fmt.Sprintf("%s\n%s", status, renderWithBorder(content, inputBorderStyle, m.width, m.height-1))
+	content := m.textinput.View()
+	return fmt.Sprintf("%s\n%s", status, renderWithBorder(content, inputBorderStyle, m.width, m.height-lipgloss.Height(status)))
 }
 
 func (m Model) viewOutputOnly() string {
 	status := m.renderStatus()
-	outputBox := renderWithBorder(m.viewport.View(), outputBorderStyle, m.width, m.height-1)
-	return fmt.Sprintf("%s\n%s", status, outputBox)
+	footer := m.footerView()
+	outputBox := renderWithBorder(m.viewport.View(), outputBorderStyle, m.width, m.height-lipgloss.Height(status)-lipgloss.Height(footer))
+	return fmt.Sprintf("%s\n%s\n%s", status, outputBox, footer)
 }
 
 func (m Model) viewFull() string {
 	status := m.renderStatus()
-	outputBox := renderWithBorder(m.viewport.View(), outputBorderStyle, m.width, m.height-m.inputHeight-2)
+	footer := m.footerView()
+	headerHeight := lipgloss.Height(status)
+	footerHeight := lipgloss.Height(footer)
+	inputBoxHeight := m.inputHeight + 2
+
+	outputHeight := m.height - headerHeight - footerHeight - inputBoxHeight
+	outputBox := renderWithBorder(m.viewport.View(), outputBorderStyle, m.width, outputHeight)
 	inputBox := renderWithBorder(m.inputView(), inputBorderStyle, m.width, m.inputHeight)
-	return fmt.Sprintf("%s\n%s\n%s", status, outputBox, inputBox)
+	return fmt.Sprintf("%s\n%s\n%s\n%s", status, outputBox, footer, inputBox)
 }
 
 func (m Model) renderStatus() string {
@@ -294,6 +324,15 @@ func (m Model) inputView() string {
 		return m.placeholder
 	}
 	return m.textinput.View()
+}
+
+func (m Model) footerView() string {
+	if m.mode == ModeInput {
+		return ""
+	}
+	info := fmt.Sprintf(" %3.f%% ", m.viewport.ScrollPercent()*100)
+	line := strings.Repeat("─", max(0, m.width-len(info)-2))
+	return lipgloss.JoinHorizontal(lipgloss.Center, line, statusStyle.Render(info))
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -363,4 +402,76 @@ func resizeDecrease(msg tea.KeyMsg) bool {
 		return msg.Runes[0] == '-'
 	}
 	return false
+}
+
+type typewriterTickMsg struct{}
+
+const typewriterInterval = 20 * time.Millisecond
+
+func (m Model) typewriterTick() tea.Cmd {
+	return tea.Tick(typewriterInterval, func(time.Time) tea.Msg {
+		return typewriterTickMsg{}
+	})
+}
+
+func (m Model) bufferChunk(c Chunk) Model {
+	if c.Kind == ChunkThinking && !m.showThinking {
+		return m
+	}
+	if c.Kind == ChunkTool && !m.showTools {
+		return m
+	}
+
+	if c.Kind == ChunkThinking || c.Kind == ChunkTool {
+		m.flushTypewriterBuf()
+		m.transcript.AppendAssistantChunk(c.MessageID, c.PartID, c.Kind, c.Text)
+		m.viewport.SetContent(m.transcript.Render(m.showThinking, m.showTools, m.spinner.View(), m.sending))
+		if m.followOutput {
+			m.viewport.GotoBottom()
+		}
+		return m
+	}
+
+	if c.PartID != m.typewriterPartID || c.MessageID != m.typewriterMsgID {
+		m.flushTypewriterBuf()
+		m.typewriterPartID = c.PartID
+		m.typewriterMsgID = c.MessageID
+	}
+
+	m.typewriterBuf = append(m.typewriterBuf, []rune(c.Text)...)
+	return m
+}
+
+func (m *Model) flushTypewriterBuf() {
+	if len(m.typewriterBuf) == 0 {
+		return
+	}
+	text := string(m.typewriterBuf)
+	m.transcript.AppendAssistantChunk(m.typewriterMsgID, m.typewriterPartID, ChunkAnswer, text)
+	m.typewriterBuf = nil
+}
+
+func (m Model) handleTypewriterTick() (tea.Model, tea.Cmd) {
+	if len(m.typewriterBuf) == 0 {
+		return m, nil
+	}
+
+	chunkSize := 3
+	if len(m.typewriterBuf) < chunkSize {
+		chunkSize = len(m.typewriterBuf)
+	}
+
+	chunk := string(m.typewriterBuf[:chunkSize])
+	m.typewriterBuf = m.typewriterBuf[chunkSize:]
+
+	m.transcript.AppendAssistantChunk(m.typewriterMsgID, m.typewriterPartID, ChunkAnswer, chunk)
+	m.viewport.SetContent(m.transcript.Render(m.showThinking, m.showTools, m.spinner.View(), m.sending))
+	if m.followOutput {
+		m.viewport.GotoBottom()
+	}
+
+	if len(m.typewriterBuf) > 0 {
+		return m, m.typewriterTick()
+	}
+	return m, nil
 }

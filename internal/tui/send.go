@@ -18,13 +18,12 @@ func (m Model) sendInput() (Model, tea.Cmd) {
 		return m, nil
 	}
 
+	m.sending = true
 	m.transcript.AddUserMessage(text)
 	m.transcript.EnsureAssistantMessage("")
 	m.viewport.SetContent(m.transcript.Render(m.showThinking, m.showTools, m.spinner.View(), m.sending))
 	m.followOutput = true
 	m.viewport.GotoBottom()
-
-	m.sending = true
 
 	cmd := func() tea.Msg {
 		if m.streamer == nil {
@@ -46,6 +45,8 @@ func (m Model) sendInput() (Model, tea.Cmd) {
 type sendComplete struct{}
 
 func (m Model) handleSendComplete() Model {
+	m.flushTypewriterBuf()
+	m.viewport.SetContent(m.transcript.Render(m.showThinking, m.showTools, m.spinner.View(), false))
 	m = m.clearInput()
 	m.sending = false
 	return m

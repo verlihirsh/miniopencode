@@ -37,5 +37,7 @@ var (
 )
 
 func renderWithBorder(content string, style lipgloss.Style, width, height int) string {
-	return style.Width(width - 4).Height(height - 2).Render(content)
+	contentWidth := max(0, width-4)
+	contentHeight := max(0, height-2)
+	return style.Width(contentWidth).Height(contentHeight).Render(content)
 }

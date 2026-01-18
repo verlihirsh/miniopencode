@@ -116,8 +116,8 @@ Deliverable:
 - Implementation: transcript.go with ApplyUpdate, EnsurePendingAssistant, Pending field.
 - Tests: transcript_test.go with OpAppend, OpSet, Pending, and no-duplication tests.
 ---
-Phase 5 — Pure Bubbles UI layout (pager-style)
-5.1 Adopt pager example layout math
+Phase 5 — Pure Bubbles UI layout (pager-style) [DONE]
+5.1 Adopt pager example layout math [DONE]
 Structure View like Bubble Tea pager example:
 - Header: status line (session/mode/server + sending indicator)
 - Output: viewport (with borders if desired, but consistently applied)
@@ -132,15 +132,17 @@ WindowSize handling:
   - tea.WithMouseCellMotion()
 Deliverable:
 - No overlap. No output outside panes. Stable resizing.
-5.2 Make viewport “follow” behavior correct
+- Implementation: Added ready flag, footerView with scroll percent, dynamic layout math.
+5.2 Make viewport "follow" behavior correct [DONE]
 - Follow mode enabled when at bottom.
 - User scroll disables follow.
 - End key restores follow + goto bottom.
 Deliverable:
 - Smooth UX with long outputs.
+- Implementation: followOutput flag, AtBottom() check, End key handler.
 ---
-Phase 6 — Spinner placeholder inside viewport (Option 2)
-6.1 Pending assistant message renders spinner inside viewport content
+Phase 6 — Spinner placeholder inside viewport (Option 2) [DONE]
+6.1 Pending assistant message renders spinner inside viewport content [DONE]
 When user sends:
 - echo user message into transcript output
 - create a pending assistant message with no parts, Pending=true
@@ -148,22 +150,24 @@ Render:
 - if latest assistant message Pending, show:
   - Assistant:
   - spinner.View() on next line (inside viewport content)
-6.2 Ensure spinner animates without SSE activity
+6.2 Ensure spinner animates without SSE activity [DONE]
 Wire spinner.TickMsg to:
 - update spinner model
 - trigger viewport content re-render (only when there is a pending assistant)
 Deliverable:
 - spinner visibly animates in output viewport while waiting.
+- Implementation: Transcript.Render shows spinnerFrame when Pending; spinner.TickMsg re-renders viewport when sending.
 ---
-Phase 7 — Typewriter (“symbol-by-symbol”) without hacks
-7.1 Buffer incoming updates
+Phase 7 — Typewriter ("symbol-by-symbol") without hacks [DONE]
+7.1 Buffer incoming updates [DONE]
 Add model fields:
 - pendingTextBuf []rune (or per-part buffers)
 - typingActive bool
 On receiving StreamUpdate:
 - for OpAppend: enqueue runes in buffer rather than applying immediately
 - for OpSet: replace visible text and reset buffer (or compute needed animation per docs)
-7.2 Typewriter tick command
+Implementation: typewriterBuf, typewriterPartID, typewriterMsgID fields; bufferChunk method.
+7.2 Typewriter tick command [DONE]
 Use tea.Tick at ~16ms–33ms:
 - each tick, if buffer non-empty:
   - pop 1 rune
@@ -172,15 +176,18 @@ Use tea.Tick at ~16ms–33ms:
 - stop ticking when buffer empty
 Deliverable:
 - true symbol-by-symbol output, controlled and smooth, not dependent on server chunking.
+- Implementation: typewriterTick returns tea.Tick(20ms); handleTypewriterTick pops 3 runes per tick.
 ---
-Phase 8 — Tests and regression harness
-8.1 Fixture-based decoding tests
+Phase 8 — Tests and regression harness [DONE]
+8.1 Fixture-based decoding tests [DONE]
 - Store a small captured SSE payload sequence (from logs) as testdata JSON lines.
 - Unit test: decode → StreamUpdate → ApplyUpdate and assert final transcript text.
-8.2 UI behavior sanity checks
+- Implementation: events_test.go, transcript_test.go
+8.2 UI behavior sanity checks [DONE]
 - Ensure no panics on resize
 - Ensure follow-mode toggles
 - Ensure pending spinner appears/disappears correctly
+- Implementation: model_test.go with typewriter tests, resize tests
 Deliverable:
 - Prevent future breakage.
 ---
