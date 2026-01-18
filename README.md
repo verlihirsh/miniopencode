@@ -1,4 +1,9 @@
-# miniopencode 🖥️ - Terminal OpenCode Client
+<!-- banner-title: 🖥️ miniopencode -->
+<!-- banner-tagline: Minimalistic opencode client -->
+
+<img src="banner.svg">
+
+<p align="center"># miniopencode 🖥️ - Terminal OpenCode Client<p>
 
 <p align="center">
   <strong>A terminal client for OpenCode with headless proxy + interactive TUI</strong><br>

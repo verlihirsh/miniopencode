@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1600" height="600" viewBox="0 0 1600 600" xmlns="http://www.w3.org/2000/svg">
+
+  <!-- Gradients -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#8BCFE6" />
+      <stop offset="50%" stop-color="#F2B5C8" />
+      <stop offset="100%" stop-color="#F8F9FB" />
+    </linearGradient>
+
+    <linearGradient id="waveGradient" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#9DD7EC" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#F6AFC3" stop-opacity="0.35" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect x="0" y="0" width="1600" height="600" fill="url(#bgGradient)" />
+
+  <!-- Waves -->
+  <path
+    d="M0 430 C 260 360, 520 520, 820 470 C 1100 430, 1380 520, 1600 480 L1600 600 L0 600 Z"
+    fill="url(#waveGradient)"
+  />
+  <path
+    d="M0 360 C 300 320, 560 430, 860 390 C 1160 350, 1380 430, 1600 400"
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-opacity="0.20"
+    stroke-width="6"
+  />
+
+  <!-- Card Container -->
+  <rect
+    x="240" y="150"
+    width="1120" height="300"
+    rx="44"
+    fill="#FFFFFF" fill-opacity="0.28"
+    stroke="#FFFFFF" stroke-opacity="0.90" stroke-width="3"
+  />
+
+  <!-- Badges -->
+  <!-- Project Name -->
+  <text
+    x="800" y="325"
+    text-anchor="middle"
+    font-family="'Hack Nerd Font', 'HackNerdFont', 'DejaVu Sans', 'Arial'"
+    font-size="88"
+    font-weight="700"
+    fill="#FFFFFF"
+  >&#128421;&#65039; miniopencode</text>
+
+  <!-- Tagline -->
+  <text
+    x="800" y="395"
+    text-anchor="middle"
+    font-family="'Hack Nerd Font', 'HackNerdFont', 'DejaVu Sans', 'Arial'"
+    font-size="36"
+    font-weight="400"
+    fill="#FFFFFF"
+    fill-opacity="0.90"
+  >Minimalistic opencode client</text>
+
+</svg>
