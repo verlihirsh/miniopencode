@@ -1,14 +1,13 @@
 package client
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -72,8 +71,9 @@ type SSEEvent struct {
 
 // Client is a minimal HTTP client for opencode server.
 type Client struct {
-	baseURL string
-	http    *http.Client
+	baseURL       string
+	http          *http.Client
+	httpNoTimeout *http.Client
 }
 
 // New builds a client from config, defaulting host/port when BaseURL is empty.
@@ -97,8 +97,9 @@ func New(cfg Config) *Client {
 	}
 
 	return &Client{
-		baseURL: baseURL,
-		http:    &http.Client{Timeout: timeout},
+		baseURL:       baseURL,
+		http:          &http.Client{Timeout: timeout},
+		httpNoTimeout: &http.Client{Timeout: 0},
 	}
 }
 
@@ -160,75 +161,30 @@ func (c *Client) SendPromptAsync(ctx context.Context, sessionID string, input Pr
 	url := fmt.Sprintf("%s/session/%s/prompt_async", c.baseURL, sessionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
 	if err != nil {
+		log.Printf("client: build prompt request failed: %v", err)
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
+	log.Printf("client: prompt_async POST start session=%s url=%s", sessionID, url)
 	resp, err := c.http.Do(req)
 	if err != nil {
+		log.Printf("client: prompt_async POST error session=%s err=%v", sessionID, err)
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+	log.Printf("client: prompt_async POST done session=%s status=%d", sessionID, resp.StatusCode)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("prompt failed: %s", string(body))
+		log.Printf("client: prompt_async POST failed session=%s status=%d body=%s", sessionID, resp.StatusCode, string(body))
+		return fmt.Errorf("prompt POST failed: %s", string(body))
 	}
 	return nil
 }
 
 // ConsumeSSE connects to /event and streams events into provided channels.
 func (c *Client) ConsumeSSE(ctx context.Context, out chan<- SSEEvent, errs chan<- error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/event", nil)
-	if err != nil {
-		errs <- err
-		return
-	}
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Cache-Control", "no-cache")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		errs <- err
-		return
-	}
-
-	go func() {
-		defer resp.Body.Close()
-		scanner := bufio.NewScanner(resp.Body)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-		var currentEvent string
-		var dataBuf []string
-
-		flush := func() {
-			if len(dataBuf) == 0 {
-				return
-			}
-			combined := strings.Join(dataBuf, "\n")
-			out <- SSEEvent{Event: currentEvent, Data: []byte(combined)}
-			dataBuf = dataBuf[:0]
-			currentEvent = ""
-		}
-
-		for scanner.Scan() {
-			line := scanner.Text()
-			switch {
-			case line == "":
-				flush()
-			case strings.HasPrefix(line, "event: "):
-				currentEvent = strings.TrimPrefix(line, "event: ")
-			case strings.HasPrefix(line, "data: "):
-				dataBuf = append(dataBuf, strings.TrimPrefix(line, "data: "))
-			case strings.HasPrefix(line, ":"):
-				// keepalive/comment line
-			default:
-				// ignore unrecognized line
-			}
-
-		}
-		if err := scanner.Err(); err != nil && ctx.Err() == nil {
-			errs <- err
-			return
-		}
-	}()
+	url := c.baseURL + "/event"
+	sseClient := NewSSEClient(url)
+	sseClient.Connect(ctx, out, errs)
 }
