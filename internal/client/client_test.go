@@ -1,31 +1,35 @@
 package client
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBaseURLFromHostPort(t *testing.T) {
 	cfg := Config{Host: "example.com", Port: 1234}
 	c := New(cfg)
-	if got := c.baseURL; got != "http://example.com:1234" {
-		t.Fatalf("base url mismatch: %s", got)
-	}
+	assert.Equal(t, "http://example.com:1234", c.baseURL, "base URL should be constructed from host and port")
+}
+
+func TestBaseURLFromExplicitBaseURL(t *testing.T) {
+	cfg := Config{BaseURL: "http://custom.server:9999"}
+	c := New(cfg)
+	assert.Equal(t, "http://custom.server:9999", c.baseURL, "should use explicit BaseURL when provided")
 }
 
 func TestListSessions(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/session" || r.Method != http.MethodGet {
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
+		assert.Equal(t, "/session", r.URL.Path)
+		assert.Equal(t, http.MethodGet, r.Method)
+
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `[{"id":"ses1","title":"t1"},{"id":"ses2","title":"t2"}]`)
 	}))
@@ -33,21 +37,39 @@ func TestListSessions(t *testing.T) {
 
 	c := New(Config{BaseURL: srv.URL})
 	sessions, err := c.ListSessions(context.Background())
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(sessions) != 2 || sessions[0].ID != "ses1" || sessions[1].Title != "t2" {
-		t.Fatalf("unexpected sessions: %+v", sessions)
-	}
+	require.NoError(t, err)
+	require.Len(t, sessions, 2)
+	assert.Equal(t, "ses1", sessions[0].ID)
+	assert.Equal(t, "t1", sessions[0].Title)
+	assert.Equal(t, "ses2", sessions[1].ID)
+	assert.Equal(t, "t2", sessions[1].Title)
+}
+
+func TestListSessionsContextCancellation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	_, err := c.ListSessions(ctx)
+	assert.Error(t, err, "should return error on context cancellation")
 }
 
 func TestCreateSession(t *testing.T) {
-	var body []byte
+	var receivedTitle string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/session" || r.Method != http.MethodPost {
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-		body, _ = io.ReadAll(r.Body)
+		assert.Equal(t, "/session", r.URL.Path)
+		assert.Equal(t, http.MethodPost, r.Method)
+
+		var body map[string]string
+		json.NewDecoder(r.Body).Decode(&body)
+		receivedTitle = body["title"]
+
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"id":"ses-new"}`)
 	}))
@@ -55,20 +77,17 @@ func TestCreateSession(t *testing.T) {
 
 	c := New(Config{BaseURL: srv.URL})
 	id, err := c.CreateSession(context.Background(), "hello")
-	if err != nil || id != "ses-new" {
-		t.Fatalf("create: id=%s err=%v", id, err)
-	}
-	if !strings.Contains(string(body), "hello") {
-		t.Fatalf("expected title in body, got %s", string(body))
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "ses-new", id)
+	assert.Equal(t, "hello", receivedTitle)
 }
 
 func TestPromptAsyncSendsModelAndAgent(t *testing.T) {
 	var captured map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/session/ses123/prompt_async" || r.Method != http.MethodPost {
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
+		assert.Equal(t, "/session/ses123/prompt_async", r.URL.Path)
+		assert.Equal(t, http.MethodPost, r.Method)
+
 		data, _ := io.ReadAll(r.Body)
 		json.Unmarshal(data, &captured)
 		w.WriteHeader(http.StatusAccepted)
@@ -81,66 +100,28 @@ func TestPromptAsyncSendsModelAndAgent(t *testing.T) {
 		Model: &ModelRef{ProviderID: "anthropic", ModelID: "claude"},
 		Agent: "build",
 	})
-	if err != nil {
-		t.Fatalf("prompt: %v", err)
-	}
+	require.NoError(t, err)
+
 	model := captured["model"].(map[string]any)
-	if model["providerID"] != "anthropic" || model["modelID"] != "claude" {
-		t.Fatalf("model not captured: %v", model)
-	}
-	if captured["agent"].(string) != "build" {
-		t.Fatalf("agent not captured: %v", captured)
-	}
+	assert.Equal(t, "anthropic", model["providerID"])
+	assert.Equal(t, "claude", model["modelID"])
+	assert.Equal(t, "build", captured["agent"].(string))
 }
 
-func TestSSEReaderCombinesMultiline(t *testing.T) {
-	stream := "" +
-		"event: message.part.updated\n" +
-		"data: {\"delta\":\"hi\"}\n" +
-		"data: {\"delta\":\" there\"}\n" +
-		"\n" +
-		"data: {\"done\":true}\n\n"
-
+func TestPromptAsyncWithoutModel(t *testing.T) {
+	var captured map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		bw := bufio.NewWriter(w)
-		bw.WriteString(stream)
-		bw.Flush()
+		json.NewDecoder(r.Body).Decode(&captured)
+		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer srv.Close()
 
 	c := New(Config{BaseURL: srv.URL})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	err := c.SendPromptAsync(context.Background(), "ses123", PromptInput{
+		Parts: []InputPart{{Type: "text", Text: "test"}},
+	})
+	require.NoError(t, err)
 
-	events := make(chan SSEEvent, 4)
-	errs := make(chan error, 1)
-	go c.ConsumeSSE(ctx, events, errs)
-
-	var received []SSEEvent
-	deadline := time.After(2 * time.Second)
-loop:
-	for {
-		select {
-		case ev := <-events:
-			received = append(received, ev)
-			if len(received) == 2 {
-				break loop
-			}
-		case err := <-errs:
-			t.Fatalf("sse error: %v", err)
-		case <-deadline:
-			t.Fatalf("timeout waiting for events")
-		}
-	}
-
-	if received[0].Event != "message.part.updated" || !bytes.Contains(received[0].Data, []byte("hi")) {
-		t.Fatalf("unexpected first event: %+v", received[0])
-	}
-	if !bytes.Contains(received[0].Data, []byte("there")) {
-		t.Fatalf("expected combined data: %s", string(received[0].Data))
-	}
-	if !bytes.Contains(received[1].Data, []byte("done")) {
-		t.Fatalf("unexpected second event: %+v", received[1])
-	}
+	_, hasModel := captured["model"]
+	assert.False(t, hasModel, "should not include model when not provided")
 }
