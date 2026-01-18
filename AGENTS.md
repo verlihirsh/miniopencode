@@ -13,19 +13,43 @@
 
 ### Build
 ```bash
+# Build to bin directory
+go build -o bin/miniopencode ./cmd/miniopencode
+
+# Or build to current directory
 go build -o miniopencode ./cmd/miniopencode
 ```
 
 ### Run
 ```bash
 # TUI (default)
-./miniopencode
+./bin/miniopencode
 
 # Headless legacy proxy
-./miniopencode --headless
+./bin/miniopencode --headless
 
 # Custom config
-./miniopencode --config ~/.config/miniopencode.yaml
+./bin/miniopencode --config ~/.config/miniopencode.yaml
+
+# With mode flag
+./bin/miniopencode --mode input
+./bin/miniopencode --mode output
+./bin/miniopencode --mode full
+
+# With server flags
+./bin/miniopencode --host 127.0.0.1 --port 4096
+
+# With session flags
+./bin/miniopencode --session daily
+./bin/miniopencode --session ses_xxxxx
+
+# With defaults flags
+./bin/miniopencode --agent build --provider anthropic --model claude-3-5-sonnet
+
+# With debug logging
+./bin/miniopencode --log /tmp/debug.log
+# Or use DEBUG env var for default path
+DEBUG=1 ./bin/miniopencode
 ```
 
 ### Test
@@ -104,16 +128,52 @@ Key fields:
 
 ---
 
+## Project Structure
+- Root: contains `main.go` (old legacy proxy code, kept for reference)
+- `cmd/miniopencode/main.go`: actual entrypoint with flags
+- `bin/`: build output directory
+- `docs/`: design docs (plan.md, sse-event-spec.md)
+- `internal/config`: YAML/CLI config loader, defaults
+- `internal/proxy`: headless stdin/stdout proxy
+- `internal/client`: HTTP + SSE client (sessions, prompt_async, SSE reader)
+- `internal/session`: daily resolver (token/message limits)
+- `internal/tui`: complete TUI implementation
+  - `app.go`, `program.go`: TUI app structure
+  - `model.go`, `events.go`, `event.go`: bubbletea model/events
+  - `stream.go`, `send.go`: SSE streaming and prompt sending
+  - `render.go`, `styles.go`, `markdown.go`: rendering and theming
+  - `transcript.go`: message history
+  - `truncate.go`: output truncation
+  - `keymap.go`: keyboard bindings
+  - `ttycheck.go`: TTY detection
+  - `*_test.go`: comprehensive test coverage
+
+---
+
+## Dependencies
+Key external libraries (see go.mod):
+- `github.com/charmbracelet/bubbletea`: TUI framework
+- `github.com/charmbracelet/bubbles`: TUI components
+- `github.com/charmbracelet/glamour`: markdown rendering
+- `github.com/charmbracelet/lipgloss`: styling
+- `github.com/tmaxmax/go-sse`: SSE client
+- `gopkg.in/yaml.v3`: config parsing
+
+---
+
 ## Coding Guidelines
 - go fmt, go test ./... before commit
 - Imports: stdlib → external → internal; keep clean
 - Errors: wrap with context; never ignore
 - Avoid global state; prefer explicit config/structs
+- Write tests for new features (see existing *_test.go files)
 
 ---
 
 ## Build/Release Checklist
 - go test ./...
 - go mod tidy
+- go build -o bin/miniopencode ./cmd/miniopencode
 - Update `miniopencode.example.yaml` if config changes
 - Keep AGENTS.md in sync (commands, config, keybindings)
+- Test both TUI and headless modes
