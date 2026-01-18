@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"opencode-tty/internal/client"
-	"opencode-tty/internal/config"
+	"miniopencode/internal/client"
+	"miniopencode/internal/config"
 )
 
 type Client interface {

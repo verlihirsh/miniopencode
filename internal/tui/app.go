@@ -3,9 +3,9 @@ package tui
 import (
 	"context"
 
-	"opencode-tty/internal/client"
-	"opencode-tty/internal/config"
-	"opencode-tty/internal/session"
+	"miniopencode/internal/client"
+	"miniopencode/internal/config"
+	"miniopencode/internal/session"
 )
 
 func Run(ctx context.Context, cfg config.Config) error {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"opencode-tty/internal/client"
+	"miniopencode/internal/client"
 )
 
 type Streamer struct {

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"opencode-tty/internal/client"
-	"opencode-tty/internal/config"
+	"miniopencode/internal/client"
+	"miniopencode/internal/config"
 )
 
 type stubClient struct {

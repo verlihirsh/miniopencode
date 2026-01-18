@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"opencode-tty/internal/client"
+	"miniopencode/internal/client"
 )
 
 type Role string

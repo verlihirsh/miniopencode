@@ -9,9 +9,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"opencode-tty/internal/config"
-	"opencode-tty/internal/proxy"
-	"opencode-tty/internal/tui"
+	"miniopencode/internal/config"
+	"miniopencode/internal/proxy"
+	"miniopencode/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

@@ -61,7 +61,7 @@ A **native terminal experience** for OpenCode with real-time streaming and flexi
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd opencode-tty
+cd miniopencode
 
 # Build to bin directory
 go build -o bin/miniopencode ./cmd/miniopencode
@@ -420,7 +420,7 @@ exec 4>&-
 ### Project Structure
 
 ```
-opencode-tty/
+miniopencode/
 ├── cmd/miniopencode/     # Entrypoint (flags, mode selection)
 ├── internal/
 │   ├── config/           # YAML/CLI config loader, defaults

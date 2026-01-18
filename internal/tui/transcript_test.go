@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"opencode-tty/internal/client"
+	"miniopencode/internal/client"
 )
 
 func TestTranscript_ApplyUpdate_OpAppend(t *testing.T) {
