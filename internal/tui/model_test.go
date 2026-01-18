@@ -6,29 +6,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func TestToggleMultiline(t *testing.T) {
-	m := NewModel(DefaultUIConfig())
-	m.textinput.SetValue("hello")
-
-	anyM, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlM})
-	m = anyM.(Model)
-	if !m.multiline {
-		t.Fatalf("expected multiline true")
-	}
-	if m.textarea.Value() != "hello" {
-		t.Fatalf("expected text to transfer, got %q", m.textarea.Value())
-	}
-
-	anyM, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlM})
-	m = anyM.(Model)
-	if m.multiline {
-		t.Fatalf("expected multiline false")
-	}
-	if m.textinput.Value() != "hello" {
-		t.Fatalf("expected text to transfer back, got %q", m.textinput.Value())
-	}
-}
-
 func TestResizeClamps(t *testing.T) {
 	cfg := DefaultUIConfig()
 	cfg.InputHeight = 5

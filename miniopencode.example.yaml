@@ -15,7 +15,6 @@ defaults:
 
 ui:
   mode: full
-  multiline: false
   show_thinking: true
   show_tools: true
   wrap: true

@@ -86,8 +86,8 @@ Deliverable:
 - Implementation: StreamUpdate type with ToStreamUpdate() method on MessagePartUpdatedEvent.
 - Tests: events_test.go with comprehensive coverage.
 ---
-Phase 4 — Transcript model that supports Set/Append by IDs
-4.1 Replace current transcript append-only behavior
+Phase 4 — Transcript model that supports Set/Append by IDs [DONE]
+4.1 Replace current transcript append-only behavior [DONE]
 Refactor transcript state:
 - Messages indexed by messageID (or fallback to last pending assistant if doc says IDs arrive late)
 - Parts indexed by partID
@@ -112,7 +112,9 @@ Operations:
   - OpAppend appends to part text
   - first non-empty update clears Pending
 Deliverable:
-- No more duplication when server sends “updated answer”.
+- No more duplication when server sends "updated answer".
+- Implementation: transcript.go with ApplyUpdate, EnsurePendingAssistant, Pending field.
+- Tests: transcript_test.go with OpAppend, OpSet, Pending, and no-duplication tests.
 ---
 Phase 5 — Pure Bubbles UI layout (pager-style)
 5.1 Adopt pager example layout math

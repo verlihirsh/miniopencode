@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"opencode-tty/internal/client"
@@ -25,13 +26,17 @@ func (s *Streamer) Start(ctx context.Context) {
 				if len(ev.Data) == 0 {
 					continue
 				}
-				// split if multiple JSON objects in combined data
 				parts := splitJSONLines(ev.Data)
 				for _, p := range parts {
-					s.Events <- makeChunk(p)
+					chunk := makeChunk(p)
+					if chunk.Text == "" {
+						continue
+					}
+					s.Events <- chunk
 				}
 			case err := <-errs:
-				s.Errors <- err
+				log.Printf("tui: sse error: %v", err)
+				s.Errors <- fmt.Errorf("sse stream error: %w", err)
 				return
 			case <-ctx.Done():
 				return

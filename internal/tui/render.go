@@ -16,15 +16,12 @@ func renderTranscript(chunks []Chunk, width int) string {
 }
 
 func renderChunk(c Chunk, width int) string {
-	md := c.Text
+	prefix := ""
 	switch c.Kind {
 	case ChunkThinking:
-		md = "### Thinking\n" + md
+		prefix = "[Thinking]\n"
 	case ChunkTool:
-		md = "### Tool\n" + md
-	case ChunkAnswer:
-		md = "### Answer\n" + md
-	default:
+		prefix = "[Tool]\n"
 	}
-	return renderMarkdown(width, md)
+	return prefix + renderMarkdown(width, c.Text)
 }

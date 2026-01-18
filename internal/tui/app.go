@@ -26,7 +26,6 @@ func Run(ctx context.Context, cfg config.Config) error {
 
 	uiCfg := UIConfig{
 		Mode:           cfg.UI.Mode,
-		Multiline:      cfg.UI.Multiline,
 		InputHeight:    cfg.UI.InputHeight,
 		ShowThinking:   cfg.UI.ShowThinking,
 		ShowTools:      cfg.UI.ShowTools,

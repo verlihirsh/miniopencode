@@ -2,11 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -28,7 +29,6 @@ const (
 
 type UIConfig struct {
 	Mode           string
-	Multiline      bool
 	InputHeight    int
 	ShowThinking   bool
 	ShowTools      bool
@@ -39,7 +39,6 @@ type UIConfig struct {
 func DefaultUIConfig() UIConfig {
 	return UIConfig{
 		Mode:           "full",
-		Multiline:      false,
 		InputHeight:    6,
 		ShowThinking:   true,
 		ShowTools:      true,
@@ -53,10 +52,9 @@ type Model struct {
 	help        help.Model
 	viewport    viewport.Model
 	textinput   textinput.Model
-	textarea    textarea.Model
+	spinner     spinner.Model
 	placeholder string
 
-	multiline     bool
 	mode          UIMode
 	width         int
 	height        int
@@ -64,6 +62,8 @@ type Model struct {
 	showThinking  bool
 	showTools     bool
 	pendingResize bool
+	sending       bool
+	followOutput  bool
 
 	streamer       *Streamer
 	sessionID      string
@@ -71,7 +71,11 @@ type Model struct {
 	chunkCh        <-chan Chunk
 	errCh          <-chan error
 	maxOutputLines int
-	transcript     []Chunk
+
+	transcript Transcript
+
+	lastPartID    string
+	lastMessageID string
 
 	serverHost string
 	serverPort int
@@ -84,17 +88,12 @@ func (m Model) appendChunk(c Chunk) Model {
 	if c.Kind == ChunkTool && !m.showTools {
 		return m
 	}
-	m.transcript = append(m.transcript, c)
-	if m.maxOutputLines > 0 {
-		var lines []string
-		for _, chunk := range m.transcript {
-			lines = append(lines, strings.Split(chunk.Text, "\n")...)
-		}
-		lines = truncateLines(lines, m.maxOutputLines)
-		m.transcript = []Chunk{{Kind: ChunkAnswer, Text: strings.Join(lines, "\n")}}
 
+	m.transcript.AppendAssistantChunk(c.MessageID, c.PartID, c.Kind, c.Text)
+	m.viewport.SetContent(m.transcript.Render(m.showThinking, m.showTools, m.spinner.View(), m.sending))
+	if m.followOutput {
+		m.viewport.GotoBottom()
 	}
-	m.viewport.SetContent(renderTranscript(m.transcript, m.width))
 	return m
 }
 
@@ -102,23 +101,30 @@ func NewModel(cfg UIConfig) Model {
 	km := DefaultKeyMap()
 	ti := textinput.New()
 	ti.Prompt = "> "
-
-	ta := textarea.New()
-	ta.SetHeight(cfg.InputHeight)
+	ti.Focus()
 
 	h := help.New()
 	h.ShowAll = false
 
+	vp := viewport.New(0, 0)
+	vp.SetContent(welcomeMessage())
+
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+
 	m := Model{
 		keys:         km,
 		help:         h,
+		viewport:     vp,
 		textinput:    ti,
-		textarea:     ta,
-		multiline:    cfg.Multiline,
+		spinner:      sp,
 		showThinking: cfg.ShowThinking,
 		showTools:    cfg.ShowTools,
 		inputHeight:  cfg.InputHeight,
+		followOutput: true,
 	}
+
+	m.textinput.Focus()
 
 	switch cfg.Mode {
 	case "input":
@@ -133,17 +139,10 @@ func NewModel(cfg UIConfig) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	m.checkTTY()
-	m.viewport.SetContent(welcomeMessage())
-
-	cmds := []tea.Cmd{}
+	cmds := []tea.Cmd{m.spinner.Tick}
 
 	if m.mode != ModeOutput {
-		if m.multiline {
-			cmds = append(cmds, m.textarea.Focus())
-		} else {
-			cmds = append(cmds, m.textinput.Focus())
-		}
+		cmds = append(cmds, textinput.Blink)
 	}
 
 	if m.chunkCh != nil {
@@ -165,6 +164,7 @@ Ready to chat...`
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -177,11 +177,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.chunkCh != nil {
 			return m, waitForChunk(m.chunkCh)
 		}
+	case sendComplete:
+		m = m.handleSendComplete()
 	case error:
-		m.transcript = append(m.transcript, Chunk{Kind: ChunkRaw, Text: msg.Error()})
-		if m.errCh != nil {
-			return m, waitForError(m.errCh)
+		m = m.clearInput()
+		m.sending = false
+		if msg != nil {
+			log.Printf("tui: error displayed: %v", msg)
+			m.transcript.AddAssistantSystemLine("[Error] " + msg.Error())
+			m.viewport.SetContent(m.transcript.Render(m.showThinking, m.showTools, m.spinner.View(), m.sending))
+
 		}
+		if m.errCh != nil {
+			return m, tea.Batch(waitForChunk(m.chunkCh), waitForError(m.errCh))
+		}
+		return m, waitForChunk(m.chunkCh)
+	case spinner.TickMsg:
+		m.spinner, cmd = m.spinner.Update(msg)
+		if m.sending {
+			m.viewport.SetContent(m.transcript.Render(m.showThinking, m.showTools, m.spinner.View(), m.sending))
+			if m.followOutput {
+				m.viewport.GotoBottom()
+			}
+		}
+		return m, cmd
 	}
 	return m, nil
 }
@@ -198,6 +217,7 @@ func (m Model) View() string {
 }
 
 func (m *Model) applySizes() {
+	m.checkTTY()
 	if m.width == 0 || m.height == 0 {
 		return
 	}
@@ -211,38 +231,29 @@ func (m *Model) applySizes() {
 		m.inputHeight = minInputHeight
 	}
 	if m.mode == ModeOutput {
-		m.viewport.Width = m.width
-		m.viewport.Height = m.height - 2
+		m.viewport.Width = m.width - 4
+		m.viewport.Height = m.height - 4
 		return
 	}
 	if m.mode == ModeInput {
 		m.textinput.Width = m.width - 2
-		m.textarea.SetWidth(m.width - 2)
-		m.textarea.SetHeight(m.height - 2)
 		return
 	}
-	// full
-	m.viewport.Width = m.width
-	m.viewport.Height = m.height - m.inputHeight - 1
+	m.viewport.Width = m.width - 4
+	m.viewport.Height = m.height - m.inputHeight - 4
 	m.textinput.Width = m.width - 2
-	m.textarea.SetWidth(m.width - 2)
-	m.textarea.SetHeight(m.inputHeight)
 }
 
 func (m Model) viewInputOnly() string {
-	var content string
-	if m.multiline {
-		content = m.textarea.View()
-	} else {
-		content = m.textinput.View()
-	}
+	content := m.textinput.View()
 	status := m.renderStatus()
 	return fmt.Sprintf("%s\n%s", status, renderWithBorder(content, inputBorderStyle, m.width, m.height-1))
 }
 
 func (m Model) viewOutputOnly() string {
 	status := m.renderStatus()
-	return fmt.Sprintf("%s\n%s", status, renderWithBorder(m.viewport.View(), outputBorderStyle, m.width, m.height-1))
+	outputBox := renderWithBorder(m.viewport.View(), outputBorderStyle, m.width, m.height-1)
+	return fmt.Sprintf("%s\n%s", status, outputBox)
 }
 
 func (m Model) viewFull() string {
@@ -261,12 +272,13 @@ func (m Model) renderStatus() string {
 		mode = "output"
 	}
 	multilineIndicator := ""
-	if m.multiline {
-		multilineIndicator = " [multiline]"
+	sendingIndicator := ""
+	if m.sending {
+		sendingIndicator = fmt.Sprintf(" %s thinking...", m.spinner.View())
 	}
 
 	left := titleStyle.Render(fmt.Sprintf("miniopencode"))
-	middle := statusStyle.Render(fmt.Sprintf("session=%s | mode=%s%s", m.sessionID, mode, multilineIndicator))
+	middle := statusStyle.Render(fmt.Sprintf("session=%s | mode=%s%s%s", m.sessionID, mode, multilineIndicator, sendingIndicator))
 	right := statusStyle.Render(fmt.Sprintf("%s:%d", m.serverHost, m.serverPort))
 
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(middle) - lipgloss.Width(right)
@@ -281,9 +293,6 @@ func (m Model) inputView() string {
 	if m.placeholder != "" {
 		return m.placeholder
 	}
-	if m.multiline {
-		return m.textarea.View()
-	}
 	return m.textinput.View()
 }
 
@@ -291,25 +300,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
-	case msg.Type == tea.KeyCtrlM:
-		if m.mode == ModeOutput {
-			return m, nil
-		}
-		if m.multiline {
-			m.textinput.SetValue(m.textarea.Value())
-			m.textarea.Blur()
-			m.multiline = false
-			return m, m.textinput.Focus()
-		} else {
-			m.textarea.SetValue(m.textinput.Value())
-			m.textinput.Blur()
-			m.multiline = true
-			return m, m.textarea.Focus()
-		}
-	case key.Matches(msg, m.keys.SendSingle) && !m.multiline:
-		return m, m.sendInput()
-	case key.Matches(msg, m.keys.SendMultiline) && m.multiline:
-		return m, m.sendInput()
+	case key.Matches(msg, m.keys.SendSingle):
+		return m.sendInput()
 	case msg.Type == tea.KeyCtrlW:
 		m.pendingResize = true
 		return m, nil
@@ -317,14 +309,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.inputHeight++
 	case m.pendingResize && resizeDecrease(msg):
 		m.inputHeight--
+	case isScrollKey(msg):
+		if msg.Type == tea.KeyEnd {
+			m.followOutput = true
+		} else {
+			m.followOutput = false
+		}
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		if m.viewport.AtBottom() {
+			m.followOutput = true
+		}
+		return m, cmd
 	default:
 		var cmd tea.Cmd
 		if m.mode == ModeOutput {
 			m.viewport, cmd = m.viewport.Update(msg)
-			return m, cmd
-		}
-		if m.multiline {
-			m.textarea, cmd = m.textarea.Update(msg)
 		} else {
 			m.textinput, cmd = m.textinput.Update(msg)
 		}
@@ -333,6 +333,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.applySizes()
 	m.pendingResize = false
 	return m, nil
+}
+
+func isScrollKey(msg tea.KeyMsg) bool {
+	switch msg.Type {
+	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown, tea.KeyHome, tea.KeyEnd:
+		return true
+	case tea.KeyCtrlU, tea.KeyCtrlD:
+		return true
+	}
+	return false
 }
 
 func resizeIncrease(msg tea.KeyMsg) bool {

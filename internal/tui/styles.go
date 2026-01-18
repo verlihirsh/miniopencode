@@ -23,9 +23,19 @@ var (
 
 	helpStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6c7086"))
+
+	thinkingStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#f9e2af")).
+			Bold(true)
+
+	toolStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#94e2d5")).
+			Bold(true)
+
+	answerStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#cdd6f4"))
 )
 
 func renderWithBorder(content string, style lipgloss.Style, width, height int) string {
-	style = style.Width(width - 4).Height(height - 2)
-	return style.Render(content)
+	return style.Width(width - 4).Height(height - 2).Render(content)
 }

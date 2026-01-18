@@ -36,7 +36,6 @@ type DefaultsConfig struct {
 
 type UIConfig struct {
 	Mode           string `yaml:"mode"`
-	Multiline      bool   `yaml:"multiline"`
 	ShowThinking   bool   `yaml:"show_thinking"`
 	ShowTools      bool   `yaml:"show_tools"`
 	Wrap           bool   `yaml:"wrap"`
@@ -64,7 +63,6 @@ type Options struct {
 	Mode             *string
 	ShowThinking     *bool
 	ShowTools        *bool
-	Multiline        *bool
 	Wrap             *bool
 	InputHeight      *int
 	MaxOutputLines   *int
@@ -86,7 +84,6 @@ func Default() Config {
 		Defaults: DefaultsConfig{},
 		UI: UIConfig{
 			Mode:           "full",
-			Multiline:      false,
 			ShowThinking:   true,
 			ShowTools:      true,
 			Wrap:           true,
@@ -151,7 +148,6 @@ type yamlConfig struct {
 	} `yaml:"defaults"`
 	UI *struct {
 		Mode           *string `yaml:"mode"`
-		Multiline      *bool   `yaml:"multiline"`
 		ShowThinking   *bool   `yaml:"show_thinking"`
 		ShowTools      *bool   `yaml:"show_tools"`
 		Wrap           *bool   `yaml:"wrap"`
@@ -218,9 +214,6 @@ func applyYAML(cfg *Config, y yamlConfig) {
 		if y.UI.Mode != nil {
 			cfg.UI.Mode = *y.UI.Mode
 		}
-		if y.UI.Multiline != nil {
-			cfg.UI.Multiline = *y.UI.Multiline
-		}
 		if y.UI.ShowThinking != nil {
 			cfg.UI.ShowThinking = *y.UI.ShowThinking
 		}
@@ -283,9 +276,6 @@ func applyOptions(cfg Config, opts Options) Config {
 	}
 	if opts.Mode != nil {
 		cfg.UI.Mode = *opts.Mode
-	}
-	if opts.Multiline != nil {
-		cfg.UI.Multiline = *opts.Multiline
 	}
 	if opts.ShowThinking != nil {
 		cfg.UI.ShowThinking = *opts.ShowThinking

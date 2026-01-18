@@ -47,7 +47,6 @@ Key fields:
 - `session.daily_max_tokens`, `session.daily_max_messages`
 - `defaults.agent`, `defaults.provider_id`, `defaults.model_id`
 - `ui.mode`: `input|output|full`
-- `ui.multiline`: true enables Ctrl+Enter send; Enter inserts newline
 - `ui.show_thinking`, `ui.show_tools`, `ui.wrap`, `ui.input_height`, `ui.max_output_lines`, `ui.theme`
 - `theme`: border style/colors for output/input/status/thinking/tool/answer
 
@@ -68,13 +67,12 @@ Key fields:
   - Mode is set at startup via config/flag, NOT switchable at runtime
   - Can run multiple instances in different modes connected to same session
   - Example: Terminal 1 with `--mode input`, Terminal 2 with `--mode output`
-- Multiline toggle: `Ctrl+M`. Single line: Enter sends. Multiline: Enter newline; Ctrl+Enter/Ctrl+J sends.
+- Input: single-line only; `Enter` sends.
 - Keybindings:
   - Quit: `Ctrl+C`, Help: `?`
-  - Multiline: `Ctrl+M`
   - Resize: `Ctrl+W` then `+`/`-`/`=` adjusts input height
   - Scroll: Arrow keys, `Ctrl+U/D` (half page), `Home/End` (top/bottom)
-  - Send: `Enter` (single-line mode), `Ctrl+Enter`/`Ctrl+J` (multiline mode)
+  - Send: `Enter`
 - Output: SSE chunks categorized (heuristic) into thinking/tool/answer; rendered as markdown; truncated to max lines
 
 ---
