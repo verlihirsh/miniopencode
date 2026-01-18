@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 
 	"opencode-tty/internal/client"
 )
@@ -26,14 +25,11 @@ func (s *Streamer) Start(ctx context.Context) {
 				if len(ev.Data) == 0 {
 					continue
 				}
-				parts := splitJSONLines(ev.Data)
-				for _, p := range parts {
-					chunk := makeChunk(p)
-					if chunk.Text == "" {
-						continue
-					}
-					s.Events <- chunk
+				chunk := parseSSEToChunk(ev)
+				if chunk.Text == "" {
+					continue
 				}
+				s.Events <- chunk
 			case err := <-errs:
 				log.Printf("tui: sse error: %v", err)
 				s.Errors <- fmt.Errorf("sse stream error: %w", err)
@@ -45,17 +41,39 @@ func (s *Streamer) Start(ctx context.Context) {
 	}()
 }
 
-func splitJSONLines(b []byte) [][]byte {
-	lines := strings.Split(string(b), "\n")
-	var out [][]byte
-	for _, l := range lines {
-		l = strings.TrimSpace(l)
-		if l == "" {
-			continue
-		}
-		out = append(out, []byte(l))
+func parseSSEToChunk(ev client.SSEEvent) Chunk {
+	parsed, err := client.ParseEvent(ev)
+	if err != nil {
+		log.Printf("tui: parse event error: %v", err)
+		return Chunk{Kind: ChunkRaw, Text: ""}
 	}
-	return out
+
+	switch e := parsed.(type) {
+	case *client.MessagePartUpdatedEvent:
+		update := e.ToStreamUpdate()
+		return Chunk{
+			Kind:      streamUpdateKindToChunkKind(update.Kind),
+			Text:      update.Text,
+			PartID:    update.PartID,
+			MessageID: update.MessageID,
+			Complete:  update.Complete,
+		}
+	default:
+		return Chunk{Kind: ChunkRaw, Text: ""}
+	}
+}
+
+func streamUpdateKindToChunkKind(pk client.PartKind) ChunkKind {
+	switch pk {
+	case client.PartKindText:
+		return ChunkAnswer
+	case client.PartKindReasoning:
+		return ChunkThinking
+	case client.PartKindTool:
+		return ChunkTool
+	default:
+		return ChunkRaw
+	}
 }
 
 func (s *Streamer) SendPrompt(ctx context.Context, sessionID string, text string, cfg PromptConfig) error {

@@ -174,13 +174,14 @@ func (t Transcript) Render(showThinking, showTools bool, spinnerFrame string, sh
 				continue
 			}
 			b.WriteString("\n")
+			text := p.Text.String()
 			switch p.Kind {
 			case ChunkThinking:
-				b.WriteString(thinkingStyle.Render(p.Text.String()))
+				b.WriteString(thinkingStyle.Render(text))
 			case ChunkTool:
-				b.WriteString(toolStyle.Render(p.Text.String()))
+				b.WriteString(toolStyle.Render(text))
 			default:
-				b.WriteString(answerStyle.Render(p.Text.String()))
+				b.WriteString(renderMarkdown(80, text))
 			}
 		}
 	}
