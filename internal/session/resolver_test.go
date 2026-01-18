@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"miniopencode/internal/client"
 	"miniopencode/internal/config"
 )
@@ -52,12 +55,9 @@ func TestResolveSpecificSessionExists(t *testing.T) {
 	r := Resolver{Client: sc, Config: baseConfig(), Now: fixedNow}
 
 	id, err := r.Resolve(context.Background(), "ses-1")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if id != "ses-1" {
-		t.Fatalf("expected existing id, got %s", id)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "ses-1", id, "should return existing session ID")
+	assert.Empty(t, sc.created, "should not create new session")
 }
 
 func TestResolveSpecificSessionMissingCreates(t *testing.T) {
@@ -65,15 +65,10 @@ func TestResolveSpecificSessionMissingCreates(t *testing.T) {
 	r := Resolver{Client: sc, Config: baseConfig(), Now: fixedNow}
 
 	id, err := r.Resolve(context.Background(), "target-session")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if id != "new-target-session" {
-		t.Fatalf("expected created id, got %s", id)
-	}
-	if len(sc.created) != 1 || sc.created[0] != "target-session" {
-		t.Fatalf("expected create with title target-session, got %v", sc.created)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "new-target-session", id, "should create session with target title")
+	require.Len(t, sc.created, 1)
+	assert.Equal(t, "target-session", sc.created[0])
 }
 
 func TestResolveDailyCreatesFirst(t *testing.T) {
@@ -81,13 +76,12 @@ func TestResolveDailyCreatesFirst(t *testing.T) {
 	r := Resolver{Client: sc, Config: baseConfig(), Now: fixedNow}
 
 	id, err := r.Resolve(context.Background(), "daily")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
+	require.NoError(t, err)
+
 	expectedTitle := "2026-01-17-daily-1"
-	if id != "new-"+expectedTitle {
-		t.Fatalf("expected new daily id, got %s", id)
-	}
+	assert.Equal(t, "new-"+expectedTitle, id, "should create first daily session")
+	require.Len(t, sc.created, 1)
+	assert.Equal(t, expectedTitle, sc.created[0])
 }
 
 func TestResolveDailyUsesExistingUnderLimit(t *testing.T) {
@@ -101,12 +95,9 @@ func TestResolveDailyUsesExistingUnderLimit(t *testing.T) {
 	r := Resolver{Client: sc, Config: baseConfig(), Now: fixedNow}
 
 	id, err := r.Resolve(context.Background(), "daily")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if id != "ses-2" {
-		t.Fatalf("expected reuse existing, got %s", id)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "ses-2", id, "should reuse existing session under limits")
+	assert.Empty(t, sc.created, "should not create new session")
 }
 
 func TestResolveDailyRollsOverWhenTokensExceeded(t *testing.T) {
@@ -120,13 +111,12 @@ func TestResolveDailyRollsOverWhenTokensExceeded(t *testing.T) {
 	r := Resolver{Client: sc, Config: baseConfig(), Now: fixedNow}
 
 	id, err := r.Resolve(context.Background(), "daily")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
+	require.NoError(t, err)
+
 	expectedNew := "2026-01-17-daily-4"
-	if id != "new-"+expectedNew {
-		t.Fatalf("expected rollover to new part, got %s", id)
-	}
+	assert.Equal(t, "new-"+expectedNew, id, "should create new part when tokens exceeded")
+	require.Len(t, sc.created, 1)
+	assert.Equal(t, expectedNew, sc.created[0])
 }
 
 func TestResolveDailyCreatesTodayWhenOnlyOldSessions(t *testing.T) {
@@ -137,11 +127,45 @@ func TestResolveDailyCreatesTodayWhenOnlyOldSessions(t *testing.T) {
 	r := Resolver{Client: sc, Config: baseConfig(), Now: fixedNow}
 
 	id, err := r.Resolve(context.Background(), "daily")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
+	require.NoError(t, err)
+
 	expected := "2026-01-17-daily-1"
-	if id != "new-"+expected {
-		t.Fatalf("expected new today part, got %s", id)
+	assert.Equal(t, "new-"+expected, id, "should create first session for today")
+	require.Len(t, sc.created, 1)
+	assert.Equal(t, expected, sc.created[0])
+}
+
+func TestResolveDailyRollsOverOnMessageLimit(t *testing.T) {
+	const testMessageLimit = 2
+	
+	title := "2026-01-17-daily-10"
+	cfg := baseConfig()
+	cfg.Session.DailyMaxMessages = testMessageLimit
+	
+	sc := &stubClient{
+		sessions: []client.Session{{ID: "ses-10", Title: title}},
+		messages: map[string][]client.Message{
+			"ses-10": {
+				{Tokens: &client.TokenUsage{Input: 1, Output: 1}},
+				{Tokens: &client.TokenUsage{Input: 1, Output: 1}},
+				{Tokens: &client.TokenUsage{Input: 1, Output: 1}}, // 3 messages exceeds limit
+			},
+		},
 	}
+	r := Resolver{Client: sc, Config: cfg, Now: fixedNow}
+
+	id, err := r.Resolve(context.Background(), "daily")
+	require.NoError(t, err)
+
+	expectedNew := "2026-01-17-daily-11"
+	assert.Equal(t, "new-"+expectedNew, id, "should create new part when message limit exceeded")
+}
+
+func TestResolveEmptySessionID(t *testing.T) {
+	sc := &stubClient{sessions: []client.Session{}}
+	r := Resolver{Client: sc, Config: baseConfig(), Now: fixedNow}
+
+	_, err := r.Resolve(context.Background(), "")
+	assert.Error(t, err, "should return error when no session ID provided")
+	assert.Contains(t, err.Error(), "no default session configured")
 }
